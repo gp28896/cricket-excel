@@ -218,6 +218,132 @@ EXCEL_MAX_SHEET_NAME_LENGTH: Final[int] = 31
 #: Maximum cell text length supported by Excel.
 EXCEL_MAX_CELL_TEXT_LENGTH: Final[int] = 32767
 
+
+###############################################################################
+# Cricket Validation Value Sets
+#
+# These immutable tuples serve as the canonical source of truth for all
+# cricket-specific dropdown values used throughout the workbook.
+#
+# Benefits
+# --------
+# • Single source of truth
+# • No duplicated strings
+# • Easier maintenance
+# • Easier localisation
+# • Easier tournament customisation
+###############################################################################
+
+YES_NO_OPTIONS: Final[tuple[str, ...]] = (
+    "Yes",
+    "No",
+)
+
+TOSS_DECISIONS: Final[tuple[str, ...]] = (
+    "Bat",
+    "Bowl",
+)
+
+MATCH_RESULTS: Final[tuple[str, ...]] = (
+    "Team Won",
+    "Tie",
+    "No Result",
+    "Abandoned",
+)
+
+DISMISSAL_TYPES: Final[tuple[str, ...]] = (
+    "Bowled",
+    "Caught",
+    "LBW",
+    "Run Out",
+    "Stumped",
+    "Hit Wicket",
+    "Obstructing the Field",
+    "Timed Out",
+    "Hit the Ball Twice",
+    "Retired Out",
+    "Retired Hurt",
+)
+
+EXTRA_TYPES: Final[tuple[str, ...]] = (
+    "None",
+    "Bye",
+    "Leg Bye",
+    "Wide",
+    "No Ball",
+    "Penalty",
+)
+
+BALL_OUTCOMES: Final[tuple[str, ...]] = (
+    "Dot Ball",
+    "Runs",
+    "Boundary Four",
+    "Six",
+    "Wicket",
+    "Wide",
+    "No Ball",
+    "Bye",
+    "Leg Bye",
+    "Penalty",
+)
+
+DRS_RESULTS: Final[tuple[str, ...]] = (
+    "Not Reviewed",
+    "Upheld",
+    "Overturned",
+    "Umpire's Call",
+)
+
+BATTING_STYLES: Final[tuple[str, ...]] = (
+    "Right-hand Bat",
+    "Left-hand Bat",
+)
+
+BOWLING_STYLES: Final[tuple[str, ...]] = (
+    "Right-arm Fast",
+    "Right-arm Fast Medium",
+    "Right-arm Medium Fast",
+    "Right-arm Medium",
+    "Right-arm Off Break",
+    "Right-arm Leg Break",
+    "Right-arm Leg Spin",
+    "Right-arm Googly",
+    "Left-arm Fast",
+    "Left-arm Fast Medium",
+    "Left-arm Medium Fast",
+    "Left-arm Medium",
+    "Left-arm Orthodox",
+    "Left-arm Wrist Spin",
+)
+
+POWERPLAY_OPTIONS: Final[tuple[str, ...]] = (
+    "None",
+    "Mandatory",
+    "Batting",
+    "Bowling",
+)
+
+NO_BALL_REASONS: Final[tuple[str, ...]] = (
+    "Front Foot",
+    "Back Foot",
+    "Above Waist Full Toss",
+    "Dangerous Short Ball",
+    "Throwing",
+    "Multiple Bounce",
+    "Breaking Wicket",
+    "Fielder Position",
+    "Keeper Position",
+    "Other",
+)
+
+WIDE_REASONS: Final[tuple[str, ...]] = (
+    "Off Side",
+    "Leg Side",
+    "Above Head",
+    "Passed Batter",
+    "Other",
+)
+
 ###############################################################################
 # Default Configuration
 ###############################################################################
@@ -2175,7 +2301,7 @@ def yes_no_validation(
         Configured Yes/No dropdown.
     """
     return list_validation(
-        ("Yes", "No"),
+        YES_NO_OPTIONS,
         allow_blank=defaults.allow_blank,
         prompt_title="Confirmation",
         prompt_message="Select Yes or No.",
@@ -2208,7 +2334,7 @@ def toss_decision_validation(
     International Cricket Council (ICC).
     """
     return list_validation(
-        ("Bat", "Bowl"),
+        TOSS_DECISIONS,
         allow_blank=defaults.allow_blank,
         prompt_title="Toss Decision",
         prompt_message="Select the toss decision.",
@@ -2310,19 +2436,7 @@ def dismissal_type_validation(
         Configured dismissal-type dropdown.
     """
     return list_validation(
-        (
-            "Bowled",
-            "Caught",
-            "LBW",
-            "Run Out",
-            "Stumped",
-            "Hit Wicket",
-            "Obstructing the Field",
-            "Timed Out",
-            "Hit the Ball Twice",
-            "Retired Out",
-            "Retired Hurt",
-        ),
+        DISMISSAL_TYPES,
         allow_blank=defaults.allow_blank,
         prompt_title="Dismissal Type",
         prompt_message="Select the method of dismissal.",
@@ -2358,14 +2472,7 @@ def extra_type_validation(
     "None" represents a legal delivery with no extras awarded.
     """
     return list_validation(
-        (
-            "None",
-            "Bye",
-            "Leg Bye",
-            "Wide",
-            "No Ball",
-            "Penalty",
-        ),
+        EXTRA_TYPES,
         allow_blank=defaults.allow_blank,
         prompt_title="Extra Type",
         prompt_message="Select the type of extra awarded.",
@@ -2397,10 +2504,7 @@ def legal_delivery_validation(
         Configured legal-delivery dropdown.
     """
     return list_validation(
-        (
-            "Yes",
-            "No",
-        ),
+        YES_NO_OPTIONS,
         allow_blank=defaults.allow_blank,
         prompt_title="Legal Delivery",
         prompt_message="Was this a legal delivery?",
@@ -2440,18 +2544,7 @@ def ball_outcome_validation(
         Configured ball-outcome dropdown.
     """
     return list_validation(
-        (
-            "Dot Ball",
-            "Runs",
-            "Boundary Four",
-            "Six",
-            "Wicket",
-            "Wide",
-            "No Ball",
-            "Bye",
-            "Leg Bye",
-            "Penalty",
-        ),
+        BALL_OUTCOMES,
         allow_blank=defaults.allow_blank,
         prompt_title="Ball Outcome",
         prompt_message="Select the primary outcome of the delivery.",
@@ -2486,12 +2579,7 @@ def drs_result_validation(
     blank cells.
     """
     return list_validation(
-        (
-            "Not Reviewed",
-            "Upheld",
-            "Overturned",
-            "Umpire's Call",
-        ),
+        DRS_RESULTS,
         allow_blank=defaults.allow_blank,
         prompt_title="DRS Result",
         prompt_message="Select the DRS outcome.",
@@ -2791,5 +2879,234 @@ __all__.extend(
         "runs_scored_validation",
         "wicket_count_validation",
         "innings_number_validation",
+    ]
+)
+
+###############################################################################
+# Cricket Validation Factories (Part 5D)
+###############################################################################
+
+def batting_style_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation for a batter's batting style.
+
+    Supported values
+    ----------------
+    Right-hand Bat
+    Left-hand Bat
+
+    Returns
+    -------
+    DataValidation
+        Configured batting-style dropdown.
+
+    Notes
+    -----
+    These values follow the terminology commonly used by the
+    International Cricket Council (ICC), domestic scorebooks,
+    and most electronic scoring systems.
+    """
+    return list_validation(
+        BATTING_STYLES,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Batting Style",
+        prompt_message="Select the batter's batting style.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid batting style.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def bowling_style_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation for a bowler's bowling style.
+
+    Supported values
+    ----------------
+    Right-arm Fast
+    Right-arm Fast Medium
+    Right-arm Medium Fast
+    Right-arm Medium
+    Right-arm Off Break
+    Right-arm Leg Break
+    Right-arm Leg Spin
+    Right-arm Googly
+    Left-arm Fast
+    Left-arm Fast Medium
+    Left-arm Medium Fast
+    Left-arm Medium
+    Left-arm Orthodox
+    Left-arm Wrist Spin
+
+    Returns
+    -------
+    DataValidation
+        Configured bowling-style dropdown.
+
+    Notes
+    -----
+    These options represent the most commonly recorded bowling
+    classifications used in professional cricket.
+    """
+    return list_validation(
+        BOWLING_STYLES,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Bowling Style",
+        prompt_message="Select the bowler's bowling style.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid bowling style.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def powerplay_selection_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation for the active powerplay.
+
+    Supported values
+    ----------------
+    None
+    Mandatory
+    Batting
+    Bowling
+
+    Returns
+    -------
+    DataValidation
+        Configured powerplay dropdown.
+
+    Notes
+    -----
+    Different competitions use different powerplay rules. This validation
+    intentionally captures only the category rather than competition-specific
+    over ranges.
+    """
+    return list_validation(
+        POWERPLAY_OPTIONS,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Powerplay",
+        prompt_message="Select the applicable powerplay.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid powerplay.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def no_ball_reason_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation describing why a delivery was called
+    a No Ball.
+
+    Supported values
+    ----------------
+    Front Foot
+    Back Foot
+    Above Waist Full Toss
+    Dangerous Short Ball
+    Throwing
+    Multiple Bounce
+    Breaking Wicket
+    Fielder Position
+    Keeper Position
+    Other
+
+    Returns
+    -------
+    DataValidation
+        Configured No Ball reason dropdown.
+
+    Notes
+    -----
+    The categories are intentionally broad so they remain applicable across
+    different playing conditions and competition regulations.
+    """
+    return list_validation(
+        NO_BALL_REASONS,
+        allow_blank=defaults.allow_blank,
+        prompt_title="No Ball Reason",
+        prompt_message="Select the reason for the No Ball.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid No Ball reason.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def wide_reason_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation describing why a delivery was called
+    Wide.
+
+    Supported values
+    ----------------
+    Off Side
+    Leg Side
+    Above Head
+    Passed Batter
+    Other
+
+    Returns
+    -------
+    DataValidation
+        Configured Wide reason dropdown.
+
+    Notes
+    -----
+    These values are intended for scoring and analysis rather than
+    umpire decision-making, allowing tournaments to record the general
+    cause of wides consistently.
+    """
+    return list_validation(
+        WIDE_REASONS,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Wide Reason",
+        prompt_message="Select the reason for the Wide.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid Wide reason.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+###############################################################################
+# Update Public API
+###############################################################################
+
+__all__.extend(
+    [
+        "batting_style_validation",
+        "bowling_style_validation",
+        "powerplay_selection_validation",
+        "no_ball_reason_validation",
+        "wide_reason_validation",
+    ]
+)
+__all__.extend(
+    [
+        "YES_NO_OPTIONS",
+        "TOSS_DECISIONS",
+        "MATCH_RESULTS",
+        "DISMISSAL_TYPES",
+        "EXTRA_TYPES",
+        "BALL_OUTCOMES",
+        "DRS_RESULTS",
+        "BATTING_STYLES",
+        "BOWLING_STYLES",
+        "POWERPLAY_OPTIONS",
+        "NO_BALL_REASONS",
+        "WIDE_REASONS",
     ]
 )
