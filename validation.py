@@ -244,7 +244,116 @@ class ValidationDefaults:
     error_title: str = DEFAULT_ERROR_TITLE
     error_message: str = DEFAULT_ERROR_MESSAGE
 
+###############################################################################
+# Validation Source Abstractions
+###############################################################################
 
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+
+
+class ValidationSourceType(str, Enum):
+    """
+    Identifies the source of values used by a dropdown validation.
+
+    This abstraction deliberately separates *where* values originate from
+    from *how* an Excel DataValidation object is ultimately created.
+
+    Future workbook implementations may introduce additional source types
+    (for example structured table references or spilled arrays) without
+    requiring changes to the public validation API.
+    """
+
+    #: Explicit inline Excel list.
+    EXPLICIT_LIST = "explicit_list"
+
+    #: Worksheet cell range.
+    WORKSHEET_RANGE = "worksheet_range"
+
+    #: Workbook defined name.
+    NAMED_RANGE = "named_range"
+
+    #: Workbook defined dynamic name.
+    DYNAMIC_NAMED_RANGE = "dynamic_named_range"
+
+    #: INDIRECT-based dependent dropdown.
+    DEPENDENT = "dependent"
+
+    #: Arbitrary Excel formula.
+    FORMULA = "formula"
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationSource:
+    """
+    Describes where dropdown values originate.
+
+    This class contains no workbook state.
+
+    It simply encapsulates the information needed to build the
+    appropriate Excel validation formula.
+
+    Examples
+    --------
+
+    Explicit list::
+
+        ValidationSource(
+            source_type=ValidationSourceType.EXPLICIT_LIST,
+            values=["Yes", "No"]
+        )
+
+    Worksheet range::
+
+        ValidationSource(
+            source_type=ValidationSourceType.WORKSHEET_RANGE,
+            worksheet="Lookup",
+            cell_range="A2:A20"
+        )
+
+    Named range::
+
+        ValidationSource(
+            source_type=ValidationSourceType.NAMED_RANGE,
+            name="Teams"
+        )
+
+    Dynamic named range::
+
+        ValidationSource(
+            source_type=ValidationSourceType.DYNAMIC_NAMED_RANGE,
+            name="Players"
+        )
+
+    Dependent dropdown::
+
+        ValidationSource(
+            source_type=ValidationSourceType.DEPENDENT,
+            parent_cell="$A$2"
+        )
+
+    Formula::
+
+        ValidationSource(
+            source_type=ValidationSourceType.FORMULA,
+            formula="OFFSET(...)"
+        )
+    """
+
+    source_type: ValidationSourceType
+
+    values: Optional[StringCollection] = None
+
+    worksheet: Optional[str] = None
+
+    cell_range: Optional[str] = None
+
+    name: Optional[str] = None
+
+    parent_cell: Optional[str] = None
+
+    formula: Optional[str] = None
 ###############################################################################
 # Validation Types
 ###############################################################################
@@ -359,6 +468,8 @@ __all__ = [
     "EXCEL_MAX_CELL_TEXT_LENGTH",
     # Dataclasses
     "ValidationDefaults",
+    "ValidationSourceType",
+    "ValidationSource",
     # Enums
     "ValidationType",
     "Operator",
@@ -1383,3 +1494,547 @@ __all__.extend(
         "named_range_validation",
     ]
 )
+
+###############################################################################
+# Dropdown Validation Builders (Part 4B)
+###############################################################################
+
+def worksheet_range_validation(
+    worksheet_name: str,
+    cell_range: str,
+    *,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a dropdown validation referencing a worksheet range.
+
+    This function is primarily a semantic wrapper around
+    :func:`range_validation`, improving readability when generating workbook
+    layouts.
+
+    Parameters
+    ----------
+    worksheet_name:
+        Worksheet containing dropdown values.
+
+    cell_range:
+        Range containing dropdown entries.
+
+    Returns
+    -------
+    DataValidation
+        Configured list validation.
+
+    Notes
+    -----
+    The worksheet is not validated for existence. Only the reference syntax is
+    verified.
+    """
+    return range_validation(
+        sheet_name=worksheet_name,
+        cell_range=cell_range,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+def dynamic_named_range_validation(
+    named_range: str,
+    *,
+    use_offset: bool = False,
+    height: FormulaValue = "COUNTA($A:$A)",
+    width: FormulaValue = 1,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a validation referencing a dynamic named range.
+
+    Dynamic ranges automatically expand or contract as source data changes.
+
+    Two strategies are commonly used:
+
+    1. Excel defined names that already contain OFFSET or INDEX formulas.
+    2. Inline OFFSET formulas.
+
+    Parameters
+    ----------
+    named_range:
+        Base named range.
+
+    use_offset:
+        If False (recommended), reference the named range directly.
+
+        If True, generate an OFFSET formula.
+
+    height:
+        OFFSET height.
+
+    width:
+        OFFSET width.
+
+    Returns
+    -------
+    DataValidation
+        Configured dropdown validation.
+
+    Notes
+    -----
+    Using a workbook-defined dynamic named range is generally preferable to
+    embedding OFFSET directly because:
+
+    * workbook formulas remain readable
+    * workbook recalculation is reduced
+    * validation rules remain simpler
+    """
+    _validate_non_empty(named_range, "named_range")
+
+    if not _is_named_range(named_range):
+        raise ValueError(
+            f"Invalid named range: {named_range}"
+        )
+
+    if use_offset:
+        formula = (
+            f"OFFSET({named_range},0,0,"
+            f"{height},{width})"
+        )
+    else:
+        formula = named_range
+
+    return _build_validation(
+        validation_type=ValidationType.LIST,
+        formula1=formula,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+def dependent_dropdown_validation(
+    parent_cell: str,
+    *,
+    indirect: bool = True,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a dependent dropdown validation.
+
+    Dependent dropdowns are commonly used where one selection determines the
+    available values in another.
+
+    Cricket examples
+    ----------------
+    Team
+        -> Players
+
+    Tournament
+        -> Matches
+
+    Country
+        -> Stadiums
+
+    Parameters
+    ----------
+    parent_cell:
+        Cell containing the parent selection.
+
+    indirect:
+        Whether to generate an INDIRECT formula.
+
+    Returns
+    -------
+    DataValidation
+        Configured validation.
+
+    Notes
+    -----
+    Excel's INDIRECT function interprets the value of the parent cell as the
+    name of another range.
+
+    Example
+    -------
+
+    If A2 contains::
+
+        India
+
+    then
+
+    ::
+
+        =INDIRECT($A$2)
+
+    references the named range called ``India``.
+
+    This is the standard mechanism used for cascading dropdowns in Excel.
+    """
+    absolute_parent = _absolute_cell(parent_cell)
+
+    if indirect:
+        formula = f"INDIRECT({absolute_parent})"
+    else:
+        formula = absolute_parent
+
+    return _build_validation(
+        validation_type=ValidationType.LIST,
+        formula1=formula,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+###############################################################################
+# Update Public API
+###############################################################################
+
+__all__.extend(
+    [
+        "worksheet_range_validation",
+        "dynamic_named_range_validation",
+        "dependent_dropdown_validation",
+    ]
+)
+
+
+###############################################################################
+# Dropdown Validation Builders (Part 4B-1)
+#
+# This section introduces helpers for worksheet-backed and dynamically-sized
+# dropdown lists. All functions remain workbook-independent and merely build
+# DataValidation objects.
+###############################################################################
+
+def _build_list_formula(
+    *,
+    explicit_values: StringCollection | None = None,
+    worksheet: str | None = None,
+    cell_range: str | None = None,
+    named_range: str | None = None,
+    formula: str | None = None,
+) -> str:
+    """
+    Build the Excel formula used by a list validation.
+
+    Exactly one source must be supplied.
+
+    Supported sources
+    -----------------
+    1. Explicit list
+    2. Worksheet range
+    3. Named range
+    4. Raw Excel formula
+
+    This helper exists so every dropdown builder constructs formulas in a
+    consistent manner.
+
+    Parameters
+    ----------
+    explicit_values:
+        Values for an inline Excel dropdown.
+
+    worksheet:
+        Worksheet containing dropdown values.
+
+    cell_range:
+        Cell range containing dropdown values.
+
+    named_range:
+        Excel defined name.
+
+    formula:
+        Raw Excel formula.
+
+    Returns
+    -------
+    str
+        Formula suitable for DataValidation.formula1.
+
+    Raises
+    ------
+    ValueError
+        If zero or multiple sources are supplied.
+    """
+    supplied = sum(
+        value is not None
+        for value in (
+            explicit_values,
+            worksheet,
+            named_range,
+            formula,
+        )
+    )
+
+    if supplied != 1:
+        raise ValueError(
+            "Exactly one validation source must be supplied."
+        )
+
+    if explicit_values is not None:
+        return _excel_list(explicit_values)
+
+    if worksheet is not None:
+        if cell_range is None:
+            raise ValueError(
+                "cell_range is required when worksheet is supplied."
+            )
+
+        return _build_formula_reference(
+            worksheet,
+            cell_range,
+        )
+
+    if named_range is not None:
+        _validate_non_empty(named_range, "named_range")
+
+        if not _is_named_range(named_range):
+            raise ValueError(
+                f"Invalid named range: {named_range}"
+            )
+
+        return named_range
+
+    assert formula is not None
+
+    return _escape_formula(formula)
+
+
+def _offset_formula(
+    *,
+    reference: str,
+    rows: FormulaValue = 0,
+    columns: FormulaValue = 0,
+    height: FormulaValue = 1,
+    width: FormulaValue = 1,
+) -> str:
+    """
+    Build an Excel OFFSET formula.
+
+    Examples
+    --------
+    OFFSET(Teams,0,0,COUNTA(Teams),1)
+
+    Parameters
+    ----------
+    reference:
+        Starting reference.
+
+    rows:
+        Row offset.
+
+    columns:
+        Column offset.
+
+    height:
+        Resulting range height.
+
+    width:
+        Resulting range width.
+
+    Returns
+    -------
+    str
+        OFFSET formula.
+    """
+    _validate_non_empty(reference, "reference")
+
+    return (
+        f"OFFSET("
+        f"{reference},"
+        f"{rows},"
+        f"{columns},"
+        f"{height},"
+        f"{width}"
+        f")"
+    )
+
+
+def worksheet_range_validation(
+    *,
+    worksheet: str,
+    cell_range: str,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a dropdown validation referencing a worksheet range.
+
+    This function is the preferred way of creating dropdowns backed by lookup
+    sheets because worksheet references have no practical size limitation,
+    unlike Excel's inline list validation.
+
+    Parameters
+    ----------
+    worksheet:
+        Worksheet containing dropdown values.
+
+    cell_range:
+        Absolute or relative Excel range.
+
+    Returns
+    -------
+    DataValidation
+        Configured list validation.
+
+    Notes
+    -----
+    Worksheet names are automatically quoted when required.
+
+    Cell ranges are converted into absolute references.
+
+    Examples
+    --------
+    ::
+
+        worksheet_range_validation(
+            worksheet="Lookup",
+            cell_range="A2:A200",
+        )
+
+    Produces::
+
+        Lookup!$A$2:$A$200
+    """
+    formula = _build_list_formula(
+        worksheet=worksheet,
+        cell_range=cell_range,
+    )
+
+    return _build_validation(
+        validation_type=ValidationType.LIST,
+        formula1=formula,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+def dynamic_named_range_validation(
+    *,
+    named_range: str,
+    use_offset: bool = False,
+    offset_rows: FormulaValue = 0,
+    offset_columns: FormulaValue = 0,
+    height: FormulaValue = 1,
+    width: FormulaValue = 1,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a validation backed by a dynamic named range.
+
+    Two strategies are supported.
+
+    Strategy 1 (recommended)
+    ------------------------
+    Reference a workbook-defined dynamic named range directly.
+
+    Example::
+
+        Players
+
+    Strategy 2
+    ----------
+    Construct an OFFSET formula dynamically.
+
+    Example::
+
+        OFFSET(
+            Players,
+            0,
+            0,
+            COUNTA(Players),
+            1
+        )
+
+    Parameters
+    ----------
+    named_range:
+        Workbook defined name.
+
+    use_offset:
+        Whether to wrap the reference in OFFSET().
+
+    offset_rows:
+        Row displacement.
+
+    offset_columns:
+        Column displacement.
+
+    height:
+        Resulting range height.
+
+    width:
+        Resulting range width.
+
+    Returns
+    -------
+    DataValidation
+        Configured dropdown validation.
+    """
+    _validate_non_empty(named_range, "named_range")
+
+    if not _is_named_range(named_range):
+        raise ValueError(
+            f"'{named_range}' is not a valid Excel named range."
+        )
+
+    if use_offset:
+        formula = _offset_formula(
+            reference=named_range,
+            rows=offset_rows,
+            columns=offset_columns,
+            height=height,
+            width=width,
+        )
+    else:
+        formula = _build_list_formula(
+            named_range=named_range,
+        )
+
+    return _build_validation(
+        validation_type=ValidationType.LIST,
+        formula1=formula,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
