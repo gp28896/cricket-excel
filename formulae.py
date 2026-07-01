@@ -488,3 +488,212 @@ def balls_to_overs(
     over_value = completed_overs + (remaining_balls / 10)
 
     return Overs(over_value)
+
+###############################################################################
+# Delivery Constants
+###############################################################################
+
+#
+# The scoring engine classifies every recorded delivery into one of the
+# following categories.
+#
+# Legal deliveries
+# ----------------
+#
+# These deliveries count towards:
+#
+#     • Ball number
+#     • Over progression
+#
+# Illegal deliveries
+# ------------------
+#
+# These award runs where applicable but DO NOT count as one of the six legal
+# deliveries in an over.
+#
+# The constants below are intentionally implemented as immutable sets for
+# efficient membership testing throughout the scoring engine.
+#
+
+#: Delivery types that consume one legal ball.
+LEGAL_DELIVERY_TYPES: Final[frozenset[str]] = frozenset({
+    "Normal",
+    "Bye",
+    "Leg Bye",
+})
+
+#: Delivery types that do not consume a legal ball.
+ILLEGAL_DELIVERY_TYPES: Final[frozenset[str]] = frozenset({
+    "Wide",
+    "No Ball",
+})
+
+#: Every delivery type recognised by the scoring engine.
+ALL_DELIVERY_TYPES: Final[frozenset[str]] = (
+    LEGAL_DELIVERY_TYPES |
+    ILLEGAL_DELIVERY_TYPES
+)
+
+###############################################################################
+# Delivery Validation Functions
+###############################################################################
+
+
+def is_legal_delivery(
+    delivery_type: str,
+) -> bool:
+    """
+    Determine whether a delivery counts as a legal ball.
+
+    Cricket laws distinguish between legal and illegal deliveries.
+
+    Legal deliveries advance the over count.
+
+    Illegal deliveries (Wide and No Ball) award extra runs where applicable
+    but do not count as one of the six legal balls in an over.
+
+    Parameters
+    ----------
+    delivery_type
+        Delivery type recorded by the scoring engine.
+
+    Returns
+    -------
+    bool
+
+        True
+            Delivery counts towards the over.
+
+        False
+            Delivery does not count towards the over.
+
+    Raises
+    ------
+    ValueError
+
+        If the supplied delivery type is unknown.
+
+    Examples
+    --------
+
+    >>> is_legal_delivery("Normal")
+    True
+
+    >>> is_legal_delivery("Bye")
+    True
+
+    >>> is_legal_delivery("Leg Bye")
+    True
+
+    >>> is_legal_delivery("Wide")
+    False
+
+    >>> is_legal_delivery("No Ball")
+    False
+    """
+
+    if delivery_type not in ALL_DELIVERY_TYPES:
+        valid_types = ", ".join(sorted(ALL_DELIVERY_TYPES))
+
+        raise ValueError(
+            f"Unknown delivery type '{delivery_type}'. "
+            f"Expected one of: {valid_types}."
+        )
+
+    return delivery_type in LEGAL_DELIVERY_TYPES
+
+
+def legal_deliveries(
+    delivery_types: list[str],
+) -> Balls:
+    """
+    Count the number of legal deliveries in an ordered delivery sequence.
+
+    This helper is frequently used while rebuilding an innings from an event
+    log or validating scorecards.
+
+    Every delivery is first validated using ``is_legal_delivery()`` to ensure
+    unknown delivery types are rejected immediately.
+
+    Parameters
+    ----------
+    delivery_types
+        Ordered list of delivery types.
+
+    Returns
+    -------
+    Balls
+        Number of legal deliveries.
+
+    Raises
+    ------
+    ValueError
+        If any delivery type is not recognised.
+
+    Examples
+    --------
+
+    >>> legal_deliveries([
+    ...     "Normal",
+    ...     "Wide",
+    ...     "Normal",
+    ...     "No Ball",
+    ... ])
+    2
+
+    >>> legal_deliveries([])
+    0
+
+    Notes
+    -----
+    This function intentionally delegates validation to
+    ``is_legal_delivery()`` so that the delivery rules are maintained in one
+    location only.
+    """
+
+    count = 0
+
+    for delivery in delivery_types:
+
+        if is_legal_delivery(delivery):
+            count += 1
+
+    return Balls(count)
+
+
+###############################################################################
+# Module Exports
+###############################################################################
+
+__all__ = [
+    # Type aliases
+    "Runs",
+    "Balls",
+    "Overs",
+    "Wickets",
+
+    # Match constants
+    "BALLS_PER_OVER",
+    "MAX_WICKETS",
+
+    # Match metadata
+    "MatchStatus",
+    "TossDecision",
+
+    # Delivery constants
+    "LEGAL_DELIVERY_TYPES",
+    "ILLEGAL_DELIVERY_TYPES",
+    "ALL_DELIVERY_TYPES",
+
+    # Conversion helpers
+    "overs_to_balls",
+    "balls_to_overs",
+
+    # Delivery helpers
+    "is_legal_delivery",
+    "legal_deliveries",
+
+    # Innings helpers
+    "remaining_balls",
+    "remaining_overs",
+]
