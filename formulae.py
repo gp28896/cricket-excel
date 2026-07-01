@@ -696,4 +696,276 @@ __all__ = [
     # Innings helpers
     "remaining_balls",
     "remaining_overs",
+
+    # Run rate calculations     
+    "calculate_run_rate",
+    "calculate_required_run_rate",
 ]
+
+###############################################################################
+# Internal Helper Functions
+###############################################################################
+
+
+def _validate_positive_balls(
+    balls: int,
+    field_name: str,
+) -> None:
+    """
+    Validate that a ball count is greater than zero.
+
+    This helper is used by rate calculations where division by zero would
+    otherwise occur.
+
+    Parameters
+    ----------
+    balls
+        Number of legal deliveries.
+
+    field_name
+        Human-readable field name.
+
+    Raises
+    ------
+    ValueError
+        If the supplied value is zero or negative.
+
+    Examples
+    --------
+    >>> _validate_positive_balls(1, "Balls")
+    >>> _validate_positive_balls(0, "Balls")
+    Traceback (most recent call last):
+        ...
+    ValueError: Balls must be greater than zero.
+    """
+
+    if balls <= 0:
+        raise ValueError(
+            f"{field_name} must be greater than zero."
+        )
+
+
+###############################################################################
+# Run Rate Calculations
+###############################################################################
+
+
+def calculate_run_rate(
+    runs: Runs | int,
+    overs_faced: Overs | int | float,
+    *,
+    precision: int = 2,
+) -> float:
+    """
+    Calculate a team's run rate.
+
+    Unlike many implementations, this function NEVER performs arithmetic
+    directly on cricket over notation.
+
+    Instead,
+
+        overs
+            ↓
+        legal deliveries
+            ↓
+        run rate
+
+    Formula
+    -------
+
+        Run Rate = Runs × 6 / Legal Deliveries
+
+    Parameters
+    ----------
+    runs
+        Runs scored.
+
+    overs_faced
+        Overs faced using cricket notation.
+
+    precision
+        Decimal places to round to.
+
+    Returns
+    -------
+    float
+        Run rate.
+
+    Raises
+    ------
+    ValueError
+
+        If
+
+        * runs is negative
+
+        * over notation is invalid
+
+        * zero legal deliveries have been bowled
+
+    Examples
+    --------
+
+    >>> calculate_run_rate(150, 20)
+    7.5
+
+    >>> calculate_run_rate(150, 18.3)
+    8.11
+
+    >>> calculate_run_rate(84, 10.4)
+    7.88
+
+    Notes
+    -----
+    Cricket notation such as
+
+        18.3
+
+    does NOT represent eighteen point three overs.
+
+    It represents
+
+        18 overs
+        +
+        3 legal deliveries
+
+    Therefore calculations are always performed using legal deliveries.
+    """
+
+    _validate_non_negative(runs, "Runs")
+
+    legal_balls = overs_to_balls(overs_faced)
+
+    _validate_positive_balls(
+        legal_balls,
+        "Overs faced",
+    )
+
+    run_rate = (runs * BALLS_PER_OVER) / legal_balls
+
+    return round(run_rate, precision)
+
+
+def calculate_required_run_rate(
+    target_runs: Runs | int,
+    current_runs: Runs | int,
+    total_overs: Overs | int | float,
+    overs_bowled: Overs | int | float,
+    *,
+    precision: int = 2,
+) -> float:
+    """
+    Calculate the required run rate.
+
+    Formula
+    -------
+
+        Runs Required × 6
+        -----------------
+        Balls Remaining
+
+    Runs Required is calculated according to cricket's chase rule:
+
+        Target - Current Score
+
+    Parameters
+    ----------
+    target_runs
+        Target score to win.
+
+    current_runs
+        Current batting score.
+
+    total_overs
+        Scheduled innings length.
+
+    overs_bowled
+        Overs already faced.
+
+    precision
+        Decimal places.
+
+    Returns
+    -------
+    float
+        Required run rate.
+
+    Raises
+    ------
+    ValueError
+
+        If
+
+        * target is negative
+
+        * current score is negative
+
+        * innings has no remaining deliveries
+
+        * over notation is invalid
+
+    Examples
+    --------
+
+    Twenty-over chase
+
+    >>> calculate_required_run_rate(
+    ...     target_runs=181,
+    ...     current_runs=120,
+    ...     total_overs=20,
+    ...     overs_bowled=15,
+    ... )
+    12.2
+
+    Fifty-over chase
+
+    >>> calculate_required_run_rate(
+    ...     target_runs=301,
+    ...     current_runs=200,
+    ...     total_overs=50,
+    ...     overs_bowled=35,
+    ... )
+    6.73
+
+    Notes
+    -----
+    If the batting side has already reached or exceeded the target,
+    the required run rate is zero.
+
+    Internally this function performs every calculation using legal
+    deliveries instead of decimal over notation.
+    """
+
+    _validate_non_negative(
+        target_runs,
+        "Target runs",
+    )
+
+    _validate_non_negative(
+        current_runs,
+        "Current runs",
+    )
+
+    #
+    # Target achieved.
+    #
+    if current_runs >= target_runs:
+        return 0.0
+
+    balls_left = remaining_balls(
+        total_overs=total_overs,
+        overs_bowled=overs_bowled,
+    )
+
+    _validate_positive_balls(
+        balls_left,
+        "Remaining balls",
+    )
+
+    runs_required = target_runs - current_runs
+
+    required_rate = (
+        runs_required * BALLS_PER_OVER
+    ) / balls_left
+
+    return round(required_rate, precision)
