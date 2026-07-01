@@ -2038,3 +2038,758 @@ def dynamic_named_range_validation(
         error_message=error_message,
         error_style=error_style,
     )
+
+
+
+###############################################################################
+# Cricket Validation Factories (Part 5A)
+###############################################################################
+
+def player_name_validation(
+    player_names: StringCollection,
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation for selecting a player.
+
+    This factory is intended for batting, bowling, fielding, captain,
+    wicketkeeper, and substitute selection throughout the workbook.
+
+    Parameters
+    ----------
+    player_names:
+        Collection of player names available for selection.
+
+    defaults:
+        Default validation configuration.
+
+    Returns
+    -------
+    DataValidation
+        Configured player-name dropdown.
+
+    Raises
+    ------
+    ValueError
+        If the collection is empty.
+
+    Notes
+    -----
+    This function is intentionally workbook-independent.
+
+    It accepts the player names directly rather than referencing any
+    worksheet or named range.
+
+    For large tournaments containing many players, callers should instead
+    use ``named_range_validation()`` or
+    ``worksheet_range_validation()``.
+    """
+    _validate_iterable(player_names, "player_names")
+
+    values = tuple(str(name).strip() for name in player_names)
+
+    if not values:
+        raise ValueError("player_names cannot be empty.")
+
+    return list_validation(
+        values,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Player",
+        prompt_message="Select a player.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid player.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def team_name_validation(
+    team_names: StringCollection,
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation for selecting a cricket team.
+
+    Parameters
+    ----------
+    team_names:
+        Available team names.
+
+    defaults:
+        Default validation configuration.
+
+    Returns
+    -------
+    DataValidation
+        Configured team dropdown.
+
+    Notes
+    -----
+    Suitable for:
+
+    * Home team
+    * Away team
+    * Toss winner
+    * Batting team
+    * Bowling team
+    """
+    _validate_iterable(team_names, "team_names")
+
+    values = tuple(str(team).strip() for team in team_names)
+
+    if not values:
+        raise ValueError("team_names cannot be empty.")
+
+    return list_validation(
+        values,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Team",
+        prompt_message="Select a team.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid team.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def yes_no_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a reusable Yes/No dropdown.
+
+    This validator is intentionally generic and can be reused for
+    numerous workbook fields including:
+
+    * Super Over
+    * Match Abandoned
+    * Follow-on
+    * Powerplay Active
+    * Duckworth-Lewis Applied
+    * Review Taken
+
+    Returns
+    -------
+    DataValidation
+        Configured Yes/No dropdown.
+    """
+    return list_validation(
+        ("Yes", "No"),
+        allow_blank=defaults.allow_blank,
+        prompt_title="Confirmation",
+        prompt_message="Select Yes or No.",
+        error_title=defaults.error_title,
+        error_message="Please choose Yes or No.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def toss_decision_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown for the toss decision.
+
+    Available values
+
+    * Bat
+    * Bowl
+
+    Returns
+    -------
+    DataValidation
+        Configured toss-decision dropdown.
+
+    Notes
+    -----
+    These values follow the terminology used by the
+    International Cricket Council (ICC).
+    """
+    return list_validation(
+        ("Bat", "Bowl"),
+        allow_blank=defaults.allow_blank,
+        prompt_title="Toss Decision",
+        prompt_message="Select the toss decision.",
+        error_title=defaults.error_title,
+        error_message="Select Bat or Bowl.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def match_result_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown for recording the official match result.
+
+    Supported values
+    ----------------
+    * Team Won
+    * Tie
+    * No Result
+    * Abandoned
+
+    Returns
+    -------
+    DataValidation
+        Configured match-result dropdown.
+
+    Notes
+    -----
+    This validator records only the category of result.
+
+    The winning team should be recorded separately using
+    ``team_name_validation()``.
+    """
+    return list_validation(
+        (
+            "Team Won",
+            "Tie",
+            "No Result",
+            "Abandoned",
+        ),
+        allow_blank=defaults.allow_blank,
+        prompt_title="Match Result",
+        prompt_message="Select the official match result.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid match result.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+###############################################################################
+# Public API
+###############################################################################
+
+__all__.extend(
+    [
+        "player_name_validation",
+        "team_name_validation",
+        "yes_no_validation",
+        "toss_decision_validation",
+        "match_result_validation",
+    ]
+)
+
+
+
+###############################################################################
+# Cricket Validation Factories (Part 5B)
+###############################################################################
+
+def dismissal_type_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation for wicket dismissal types.
+
+    Supported dismissal methods follow standard Laws of Cricket terminology
+    commonly used in scorebooks and scoring software.
+
+    Values
+    ------
+    Bowled
+    Caught
+    LBW
+    Run Out
+    Stumped
+    Hit Wicket
+    Obstructing the Field
+    Timed Out
+    Hit the Ball Twice
+    Retired Out
+    Retired Hurt
+
+    Returns
+    -------
+    DataValidation
+        Configured dismissal-type dropdown.
+    """
+    return list_validation(
+        (
+            "Bowled",
+            "Caught",
+            "LBW",
+            "Run Out",
+            "Stumped",
+            "Hit Wicket",
+            "Obstructing the Field",
+            "Timed Out",
+            "Hit the Ball Twice",
+            "Retired Out",
+            "Retired Hurt",
+        ),
+        allow_blank=defaults.allow_blank,
+        prompt_title="Dismissal Type",
+        prompt_message="Select the method of dismissal.",
+        error_title=defaults.error_title,
+        error_message="Select a valid dismissal type.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def extra_type_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown validation for cricket extras.
+
+    Supported values
+    ----------------
+    None
+    Bye
+    Leg Bye
+    Wide
+    No Ball
+    Penalty
+
+    Returns
+    -------
+    DataValidation
+        Configured extras dropdown.
+
+    Notes
+    -----
+    "None" represents a legal delivery with no extras awarded.
+    """
+    return list_validation(
+        (
+            "None",
+            "Bye",
+            "Leg Bye",
+            "Wide",
+            "No Ball",
+            "Penalty",
+        ),
+        allow_blank=defaults.allow_blank,
+        prompt_title="Extra Type",
+        prompt_message="Select the type of extra awarded.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid extra type.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def legal_delivery_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a Yes/No dropdown indicating whether the delivery is legal.
+
+    This validation is intentionally independent of the recorded extra
+    because some scoring systems determine legality before calculating
+    innings progression.
+
+    Values
+    ------
+    Yes
+    No
+
+    Returns
+    -------
+    DataValidation
+        Configured legal-delivery dropdown.
+    """
+    return list_validation(
+        (
+            "Yes",
+            "No",
+        ),
+        allow_blank=defaults.allow_blank,
+        prompt_title="Legal Delivery",
+        prompt_message="Was this a legal delivery?",
+        error_title=defaults.error_title,
+        error_message="Select Yes or No.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def ball_outcome_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown describing the overall outcome of a delivery.
+
+    The values intentionally describe the primary scoring event for the
+    delivery. Additional detail (runs, dismissal type, extras, etc.) should
+    be captured using their dedicated validation fields.
+
+    Supported values
+    ----------------
+    Dot Ball
+    Runs
+    Boundary Four
+    Six
+    Wicket
+    Wide
+    No Ball
+    Bye
+    Leg Bye
+    Penalty
+
+    Returns
+    -------
+    DataValidation
+        Configured ball-outcome dropdown.
+    """
+    return list_validation(
+        (
+            "Dot Ball",
+            "Runs",
+            "Boundary Four",
+            "Six",
+            "Wicket",
+            "Wide",
+            "No Ball",
+            "Bye",
+            "Leg Bye",
+            "Penalty",
+        ),
+        allow_blank=defaults.allow_blank,
+        prompt_title="Ball Outcome",
+        prompt_message="Select the primary outcome of the delivery.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid ball outcome.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def drs_result_validation(
+    *,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a dropdown for Decision Review System (DRS) outcomes.
+
+    Supported values
+    ----------------
+    Not Reviewed
+    Upheld
+    Overturned
+    Umpire's Call
+
+    Returns
+    -------
+    DataValidation
+        Configured DRS-result dropdown.
+
+    Notes
+    -----
+    "Not Reviewed" allows the field to remain meaningful without relying on
+    blank cells.
+    """
+    return list_validation(
+        (
+            "Not Reviewed",
+            "Upheld",
+            "Overturned",
+            "Umpire's Call",
+        ),
+        allow_blank=defaults.allow_blank,
+        prompt_title="DRS Result",
+        prompt_message="Select the DRS outcome.",
+        error_title=defaults.error_title,
+        error_message="Please select a valid DRS result.",
+        error_style=ErrorStyle.STOP,
+    )
+
+
+###############################################################################
+# Update Public API
+###############################################################################
+
+__all__.extend(
+    [
+        "dismissal_type_validation",
+        "extra_type_validation",
+        "legal_delivery_validation",
+        "ball_outcome_validation",
+        "drs_result_validation",
+    ]
+)
+
+###############################################################################
+# Cricket Validation Factories (Part 5C)
+###############################################################################
+
+def over_number_validation(
+    *,
+    maximum_overs: int = 50,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a validation for the over number.
+
+    The over number represents the completed over count within an innings.
+
+    Parameters
+    ----------
+    maximum_overs:
+        Maximum overs permitted in the match format.
+
+        Typical values:
+
+        * 20  -> T20
+        * 50  -> ODI
+        * 90+ -> Multi-day cricket
+
+    defaults:
+        Shared validation defaults.
+
+    Returns
+    -------
+    DataValidation
+        Integer validation permitting values from 0 to
+        ``maximum_overs``.
+
+    Raises
+    ------
+    ValueError
+        If ``maximum_overs`` is less than one.
+    """
+    if maximum_overs < 1:
+        raise ValueError(
+            "maximum_overs must be greater than zero."
+        )
+
+    return whole_number_validation(
+        minimum=0,
+        maximum=maximum_overs,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Over Number",
+        prompt_message="Enter the completed over number.",
+        error_title=defaults.error_title,
+        error_message=(
+            f"Over number must be between 0 and "
+            f"{maximum_overs}."
+        ),
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def ball_number_validation(
+    *,
+    balls_per_over: int = 6,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a validation for the legal ball number within an over.
+
+    Cricket scoring normally records legal deliveries numbered from
+    1 through 6.
+
+    Parameters
+    ----------
+    balls_per_over:
+        Number of legal deliveries in an over.
+
+    defaults:
+        Shared validation defaults.
+
+    Returns
+    -------
+    DataValidation
+        Integer validation.
+
+    Notes
+    -----
+    This validation applies only to legal deliveries.
+
+    Wides and No Balls are represented separately by the scoring
+    engine and therefore do not require extending the numeric range.
+    """
+    if balls_per_over < 1:
+        raise ValueError(
+            "balls_per_over must be greater than zero."
+        )
+
+    return whole_number_validation(
+        minimum=1,
+        maximum=balls_per_over,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Ball Number",
+        prompt_message="Enter the legal delivery number.",
+        error_title=defaults.error_title,
+        error_message=(
+            f"Ball number must be between 1 and "
+            f"{balls_per_over}."
+        ),
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def runs_scored_validation(
+    *,
+    maximum_runs: int = 7,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a validation for runs scored from a single delivery.
+
+    Parameters
+    ----------
+    maximum_runs:
+        Upper limit accepted by the validation.
+
+    defaults:
+        Shared validation defaults.
+
+    Returns
+    -------
+    DataValidation
+        Whole-number validation.
+
+    Notes
+    -----
+    A default maximum of seven supports the overwhelming majority
+    of deliveries:
+
+    * Dot ball
+    * Singles
+    * Twos
+    * Threes
+    * Four
+    * Five
+    * Six
+    * Seven (rare overthrow scenarios)
+
+    Larger totals resulting from multiple overthrows can still be
+    supported by increasing ``maximum_runs``.
+    """
+    if maximum_runs < 0:
+        raise ValueError(
+            "maximum_runs cannot be negative."
+        )
+
+    return whole_number_validation(
+        minimum=0,
+        maximum=maximum_runs,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Runs",
+        prompt_message="Enter runs scored from the delivery.",
+        error_title=defaults.error_title,
+        error_message=(
+            f"Runs must be between 0 and "
+            f"{maximum_runs}."
+        ),
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def wicket_count_validation(
+    *,
+    maximum_wickets: int = 10,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a validation for wickets fallen.
+
+    Parameters
+    ----------
+    maximum_wickets:
+        Maximum wickets permitted in an innings.
+
+    defaults:
+        Shared validation defaults.
+
+    Returns
+    -------
+    DataValidation
+        Whole-number validation.
+
+    Notes
+    -----
+    Standard cricket innings end after ten wickets have fallen,
+    making ten the default upper bound.
+    """
+    if maximum_wickets < 1:
+        raise ValueError(
+            "maximum_wickets must be greater than zero."
+        )
+
+    return whole_number_validation(
+        minimum=0,
+        maximum=maximum_wickets,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Wickets",
+        prompt_message="Enter wickets fallen.",
+        error_title=defaults.error_title,
+        error_message=(
+            f"Wickets must be between 0 and "
+            f"{maximum_wickets}."
+        ),
+        error_style=ErrorStyle.STOP,
+    )
+
+
+def innings_number_validation(
+    *,
+    maximum_innings: int = 4,
+    defaults: ValidationDefaults = ValidationDefaults(),
+) -> DataValidation:
+    """
+    Create a validation for the innings number.
+
+    Parameters
+    ----------
+    maximum_innings:
+        Maximum innings supported.
+
+        Typical values:
+
+        * 2 -> Limited overs cricket
+        * 4 -> First-class cricket
+
+    defaults:
+        Shared validation defaults.
+
+    Returns
+    -------
+    DataValidation
+        Whole-number validation.
+
+    Raises
+    ------
+    ValueError
+        If ``maximum_innings`` is less than one.
+    """
+    if maximum_innings < 1:
+        raise ValueError(
+            "maximum_innings must be greater than zero."
+        )
+
+    return whole_number_validation(
+        minimum=1,
+        maximum=maximum_innings,
+        allow_blank=defaults.allow_blank,
+        prompt_title="Innings",
+        prompt_message="Select the innings number.",
+        error_title=defaults.error_title,
+        error_message=(
+            f"Innings must be between 1 and "
+            f"{maximum_innings}."
+        ),
+        error_style=ErrorStyle.STOP,
+    )
+
+
+###############################################################################
+# Update Public API
+###############################################################################
+
+__all__.extend(
+    [
+        "over_number_validation",
+        "ball_number_validation",
+        "runs_scored_validation",
+        "wicket_count_validation",
+        "innings_number_validation",
+    ]
+)
