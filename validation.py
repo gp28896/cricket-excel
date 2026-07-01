@@ -789,3 +789,597 @@ __all__.extend(
         "_is_named_range",
     ]
 )
+
+###############################################################################
+# Generic Validation Builders (Part 3A)
+###############################################################################
+
+from typing import Any
+
+
+def _build_validation(
+    *,
+    validation_type: ValidationType,
+    operator: Operator | None = None,
+    formula1: FormulaValue | None = None,
+    formula2: FormulaValue | None = None,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Construct and configure an ``openpyxl`` DataValidation object.
+
+    This helper centralises all DataValidation construction used throughout
+    the module. Every public validation builder should delegate object
+    creation to this function to ensure deterministic behaviour and
+    consistent configuration.
+
+    Parameters
+    ----------
+    validation_type:
+        Excel validation category.
+
+    operator:
+        Optional comparison operator.
+
+    formula1:
+        Primary comparison formula.
+
+    formula2:
+        Secondary comparison formula.
+
+    allow_blank:
+        Whether blank cells are permitted.
+
+    prompt_title:
+        Input message title.
+
+    prompt_message:
+        Input message displayed when the cell is selected.
+
+    error_title:
+        Error dialog title.
+
+    error_message:
+        Error dialog text.
+
+    error_style:
+        Excel error style.
+
+    Returns
+    -------
+    DataValidation
+        Fully configured validation object.
+
+    Notes
+    -----
+    This function intentionally does not attach the validation to any cells.
+    Workbook integration is handled later by dedicated helper functions.
+    """
+    validation = DataValidation(
+        type=validation_type.value,
+        allowBlank=allow_blank,
+    )
+
+    if operator is not None:
+        validation.operator = operator.value
+
+    if formula1 is not None:
+        if isinstance(formula1, str):
+            formula1 = _escape_formula(formula1)
+        validation.formula1 = formula1
+
+    if formula2 is not None:
+        if isinstance(formula2, str):
+            formula2 = _escape_formula(formula2)
+        validation.formula2 = formula2
+
+    validation.promptTitle = prompt_title
+    validation.prompt = prompt_message
+
+    validation.errorTitle = error_title
+    validation.error = error_message
+
+    validation.showInputMessage = DEFAULT_SHOW_INPUT_MESSAGE
+    validation.showErrorMessage = DEFAULT_SHOW_ERROR_MESSAGE
+
+    validation.errorStyle = error_style.value
+
+    return validation
+
+
+def integer_validation(
+    *,
+    minimum: Number | None = None,
+    maximum: Number | None = None,
+    operator: Operator = Operator.BETWEEN,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create an integer (whole number) validation.
+
+    Parameters
+    ----------
+    minimum:
+        Lower bound.
+
+    maximum:
+        Upper bound.
+
+    operator:
+        Excel comparison operator.
+
+    allow_blank:
+        Whether blank cells are allowed.
+
+    prompt_title, prompt_message:
+        Input message configuration.
+
+    error_title, error_message:
+        Error dialog configuration.
+
+    error_style:
+        Excel error style.
+
+    Returns
+    -------
+    DataValidation
+        Configured validation object.
+
+    Notes
+    -----
+    The meaning of ``minimum`` and ``maximum`` depends on the selected
+    operator.
+
+    Examples
+    --------
+    ::
+
+        integer_validation(
+            minimum=0,
+            maximum=10
+        )
+
+        integer_validation(
+            operator=Operator.GREATER_THAN,
+            minimum=0
+        )
+    """
+    if minimum is not None and not isinstance(minimum, int):
+        raise TypeError("minimum must be an integer")
+
+    if maximum is not None and not isinstance(maximum, int):
+        raise TypeError("maximum must be an integer")
+
+    if (
+        operator == Operator.BETWEEN
+        and minimum is not None
+        and maximum is not None
+        and minimum > maximum
+    ):
+        raise ValueError(
+            "minimum cannot be greater than maximum"
+        )
+
+    return _build_validation(
+        validation_type=ValidationType.WHOLE,
+        operator=operator,
+        formula1=minimum,
+        formula2=maximum,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+def whole_number_validation(
+    *,
+    minimum: Number | None = None,
+    maximum: Number | None = None,
+    operator: Operator = Operator.BETWEEN,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a whole-number validation.
+
+    This function is an explicit semantic alias of
+    :func:`integer_validation`.
+
+    The alias improves readability in workbook-generation code while
+    keeping all implementation logic in a single location.
+
+    Returns
+    -------
+    DataValidation
+        Configured validation object.
+    """
+    return integer_validation(
+        minimum=minimum,
+        maximum=maximum,
+        operator=operator,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+def decimal_validation(
+    *,
+    minimum: Number | None = None,
+    maximum: Number | None = None,
+    operator: Operator = Operator.BETWEEN,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a decimal-number validation.
+
+    Unlike integer validation, decimal validation accepts both integer
+    and floating-point values.
+
+    Parameters
+    ----------
+    minimum:
+        Lower numeric bound.
+
+    maximum:
+        Upper numeric bound.
+
+    operator:
+        Excel comparison operator.
+
+    allow_blank:
+        Whether blank cells are permitted.
+
+    Returns
+    -------
+    DataValidation
+        Configured validation object.
+
+    Examples
+    --------
+    ::
+
+        decimal_validation(
+            minimum=0.0,
+            maximum=100.0
+        )
+
+        decimal_validation(
+            operator=Operator.LESS_THAN,
+            maximum=1.5
+        )
+    """
+    if minimum is not None and not isinstance(minimum, (int, float)):
+        raise TypeError(
+            "minimum must be numeric"
+        )
+
+    if maximum is not None and not isinstance(maximum, (int, float)):
+        raise TypeError(
+            "maximum must be numeric"
+        )
+
+    if (
+        operator == Operator.BETWEEN
+        and minimum is not None
+        and maximum is not None
+        and minimum > maximum
+    ):
+        raise ValueError(
+            "minimum cannot exceed maximum"
+        )
+
+    return _build_validation(
+        validation_type=ValidationType.DECIMAL,
+        operator=operator,
+        formula1=minimum,
+        formula2=maximum,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+###############################################################################
+# Dropdown Validation Builders (Part 4A)
+###############################################################################
+
+def list_validation(
+    values: StringCollection,
+    *,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create an Excel dropdown validation from an explicit list of values.
+
+    This function is intended for relatively small lists that can be embedded
+    directly into the validation formula.
+
+    Excel stores explicit dropdowns as a quoted comma-separated string, for
+    example::
+
+        "Yes,No"
+
+    Unfortunately Excel limits this string to approximately 255 characters.
+    Longer lists must instead be stored in worksheet cells and referenced via
+    a worksheet range or named range.
+
+    Parameters
+    ----------
+    values:
+        Sequence of dropdown values.
+
+    allow_blank:
+        Whether blank cells are permitted.
+
+    prompt_title:
+        Input prompt title.
+
+    prompt_message:
+        Input prompt message.
+
+    error_title:
+        Error dialog title.
+
+    error_message:
+        Error dialog message.
+
+    error_style:
+        Excel validation error style.
+
+    Returns
+    -------
+    DataValidation
+        Configured list validation.
+
+    Raises
+    ------
+    TypeError
+        If values is not an iterable collection.
+
+    ValueError
+        If the collection is empty.
+
+    ValueError
+        If the combined explicit list exceeds Excel's inline limit.
+
+    Notes
+    -----
+    This function intentionally raises an exception for oversized lists rather
+    than silently converting them into worksheet-based dropdowns. Workbook
+    generation should explicitly decide where long lists are stored.
+    """
+    _validate_iterable(values, "values")
+
+    cleaned: list[str] = []
+
+    for value in values:
+        text = str(value).strip()
+
+        if not text:
+            raise ValueError(
+                "Dropdown values cannot contain empty strings."
+            )
+
+        if "," in text:
+            raise ValueError(
+                "Dropdown values cannot contain commas "
+                "when using explicit Excel lists."
+            )
+
+        cleaned.append(text)
+
+    formula = _excel_list(cleaned)
+
+    return _build_validation(
+        validation_type=ValidationType.LIST,
+        formula1=formula,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+def range_validation(
+    *,
+    sheet_name: str,
+    cell_range: str,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a dropdown validation using a worksheet range.
+
+    Examples
+    --------
+    ::
+
+        range_validation(
+            sheet_name="Lookup",
+            cell_range="A2:A20",
+        )
+
+    Generates a validation referencing::
+
+        Lookup!$A$2:$A$20
+
+    If the worksheet name contains spaces or special characters it is
+    automatically quoted.
+
+    Parameters
+    ----------
+    sheet_name:
+        Worksheet containing the dropdown values.
+
+    cell_range:
+        Excel range containing dropdown values.
+
+    allow_blank:
+        Whether blank values are permitted.
+
+    Returns
+    -------
+    DataValidation
+        Configured validation object.
+
+    Notes
+    -----
+    This function performs only syntactic validation.
+
+    It does not verify that the worksheet or cells actually exist.
+    """
+    reference = _build_formula_reference(
+        sheet_name=sheet_name,
+        cell_range=cell_range,
+    )
+
+    return _build_validation(
+        validation_type=ValidationType.LIST,
+        formula1=reference,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+def named_range_validation(
+    named_range: str,
+    *,
+    allow_blank: bool = DEFAULT_ALLOW_BLANK,
+    prompt_title: str = DEFAULT_PROMPT_TITLE,
+    prompt_message: str = DEFAULT_PROMPT_MESSAGE,
+    error_title: str = DEFAULT_ERROR_TITLE,
+    error_message: str = DEFAULT_ERROR_MESSAGE,
+    error_style: ErrorStyle = ErrorStyle.STOP,
+) -> DataValidation:
+    """
+    Create a dropdown validation using an Excel named range.
+
+    Named ranges are the preferred approach for large dropdowns because they
+
+    * avoid Excel's 255-character explicit-list limitation,
+    * automatically adapt when workbook layout changes,
+    * improve readability of workbook formulas,
+    * allow dynamic dropdowns.
+
+    Parameters
+    ----------
+    named_range:
+        Excel defined name.
+
+    allow_blank:
+        Whether blank values are allowed.
+
+    prompt_title:
+        Input prompt title.
+
+    prompt_message:
+        Input prompt.
+
+    error_title:
+        Error dialog title.
+
+    error_message:
+        Error dialog text.
+
+    error_style:
+        Excel error style.
+
+    Returns
+    -------
+    DataValidation
+        Configured dropdown validation.
+
+    Raises
+    ------
+    ValueError
+        If the supplied name is not a syntactically valid Excel defined name.
+
+    Examples
+    --------
+    ::
+
+        named_range_validation("Teams")
+
+        named_range_validation("PlayerNames")
+
+    Notes
+    -----
+    This function validates only the syntax of the supplied name.
+
+    Existence of the named range is verified later when the workbook is
+    generated.
+    """
+    _validate_non_empty(named_range, "named_range")
+
+    if not _is_named_range(named_range):
+        raise ValueError(
+            f"'{named_range}' is not a valid Excel named range."
+        )
+
+    return _build_validation(
+        validation_type=ValidationType.LIST,
+        formula1=named_range,
+        allow_blank=allow_blank,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        error_title=error_title,
+        error_message=error_message,
+        error_style=error_style,
+    )
+
+
+###############################################################################
+# Update Public API
+###############################################################################
+
+__all__.extend(
+    [
+        "list_validation",
+        "range_validation",
+        "named_range_validation",
+    ]
+)
