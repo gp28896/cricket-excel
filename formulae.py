@@ -1,10 +1,10 @@
 """
 ===============================================================================
 Project : Cricket Excel Tournament Scoring Engine
-Module  : formulas.py
+Module  : formulae.py
 
 Author  : <Your Name>
-Version : 0.1.0
+Version : 0.2.0
 
 Description
 -------------------------------------------------------------------------------
@@ -13,37 +13,81 @@ This module contains ONLY pure cricket calculation functions.
 
 It intentionally has **NO dependency** on:
 
-    - openpyxl
-    - Workbook
-    - Worksheet
-    - Excel formulas
-    - File system
-    - GUI
+    • openpyxl
+    • Workbook
+    • Worksheet
+    • Excel formulas
+    • File system
+    • GUI
+    • Database
+    • Web framework
 
 The purpose of this module is to provide deterministic cricket calculations
 that can be reused by every other component of the project.
 
-The module should never directly modify workbook contents.
+The module never reads from or writes to Excel.
 
-Instead, other modules (score_ball.py, leaderboard.py, scorecard.py, etc.)
-will call these functions and then write the returned values into Excel.
+Instead, higher-level modules (score_ball.py, scorecard.py,
+leaderboard.py, workbook.py, etc.) call these functions and then write
+their returned values into the workbook.
 
-Benefits
---------
-
-✓ Easy to test
-✓ Easy to reuse
-✓ Independent of Excel
-✓ Future web application can reuse the exact same logic
-✓ Suitable for unit testing
-
+Design Goals
 -------------------------------------------------------------------------------
+
+✓ Pure functions
+✓ No side effects
+✓ Easy unit testing
+✓ Deterministic behaviour
+✓ Reusable by future desktop, mobile and web applications
+✓ Independent of Excel implementation
+
+Internal Design
+-------------------------------------------------------------------------------
+
+Cricket overs are **NOT decimal numbers**.
+
+For example,
+
+    19.5
+
+does NOT mean
+
+    nineteen point five overs
+
+It means
+
+    19 overs
+    +
+    5 legal deliveries
+
+Internally, almost every cricket calculation should therefore be performed
+using **legal deliveries (balls)** rather than decimal overs.
+
+Example
+
+Instead of
+
+    18.4 + 1.2
+
+convert to
+
+    112 balls + 8 balls
+
+perform the arithmetic
+
+then convert back into cricket notation.
+
+This approach eliminates floating-point errors and keeps calculations
+consistent throughout the scoring engine.
+
 Future Sections
+-------------------------------------------------------------------------------
 
 Part 1
     ✓ Constants
     ✓ Type aliases
-    ✓ Helper conversion functions
+    ✓ Validation helpers
+    ✓ Conversion helpers
 
 Part 2
     • Remaining balls
@@ -65,14 +109,37 @@ Part 5
 
 from __future__ import annotations
 
-from typing import Final, Literal, NewType
-
 ###############################################################################
-#                               TYPE ALIASES
+# Imports
 ###############################################################################
 
-# Using NewType improves readability without affecting runtime performance.
-# These aliases make function signatures self-documenting.
+from math import isclose
+from typing import Final
+from typing import Literal
+from typing import NewType
+from typing import overload
+
+###############################################################################
+# Type Aliases
+###############################################################################
+
+# -----------------------------------------------------------------------------
+# These aliases improve readability without changing runtime behaviour.
+#
+# Example
+#
+#     def calculate_run_rate(
+#         runs: Runs,
+#         balls: Balls,
+#     ) -> float:
+#
+# is much clearer than
+#
+#     def calculate_run_rate(
+#         runs: int,
+#         balls: int,
+#     ) -> float:
+# -----------------------------------------------------------------------------
 
 Runs = NewType("Runs", int)
 Balls = NewType("Balls", int)
@@ -80,16 +147,19 @@ Overs = NewType("Overs", float)
 Wickets = NewType("Wickets", int)
 
 ###############################################################################
-#                            MATCH CONSTANTS
+# Match Constants
 ###############################################################################
 
-# Number of legal deliveries in a standard over.
+#: Number of legal deliveries in one completed over.
 BALLS_PER_OVER: Final[int] = 6
 
-# Maximum wickets available in an innings.
+#: Maximum wickets that can fall in a completed innings.
 MAX_WICKETS: Final[int] = 10
 
-# Common match status values.
+###############################################################################
+# Match Status
+###############################################################################
+
 MatchStatus = Literal[
     "Scheduled",
     "Live",
@@ -98,48 +168,26 @@ MatchStatus = Literal[
     "No Result",
 ]
 
-# Toss decision values.
+###############################################################################
+# Toss Decision
+###############################################################################
+
 TossDecision = Literal[
     "Bat",
     "Bowl",
 ]
 
 ###############################################################################
-#                          DELIVERY CONSTANTS
-###############################################################################
-
-# Delivery types recognised by the scoring engine.
-#
-# A legal delivery counts towards the over.
-#
-# Wide and No Ball DO NOT count as legal deliveries.
-#
-# These constants will be referenced throughout the scoring engine.
-
-LEGAL_DELIVERY_TYPES: Final[set[str]] = {
-    "Normal",
-    "Bye",
-    "Leg Bye",
-}
-
-ILLEGAL_DELIVERY_TYPES: Final[set[str]] = {
-    "Wide",
-    "No Ball",
-}
-
-ALL_DELIVERY_TYPES: Final[set[str]] = (
-    LEGAL_DELIVERY_TYPES |
-    ILLEGAL_DELIVERY_TYPES
-)
-
-###############################################################################
-#                         VALIDATION HELPER FUNCTIONS
+# Validation Helpers
 ###############################################################################
 
 
-def _validate_non_negative(value: int | float, field_name: str) -> None:
+def _validate_non_negative(
+    value: int | float,
+    field_name: str,
+) -> None:
     """
-    Validate that a numeric value is not negative.
+    Validate that a numeric value is non-negative.
 
     Parameters
     ----------
@@ -147,33 +195,151 @@ def _validate_non_negative(value: int | float, field_name: str) -> None:
         Numeric value to validate.
 
     field_name
-        Human-readable field name.
+        Human-readable field name used in error messages.
 
     Raises
     ------
     ValueError
-        If the supplied value is negative.
+        If value is negative.
+
+    Examples
+    --------
+    >>> _validate_non_negative(5, "Runs")
+
+    >>> _validate_non_negative(-1, "Runs")
+    Traceback (most recent call last):
+        ...
+    ValueError: Runs cannot be negative.
     """
 
     if value < 0:
         raise ValueError(f"{field_name} cannot be negative.")
 
 
+def _validate_over_notation(
+    overs: int | float,
+) -> None:
+    """
+    Validate that a cricket over uses valid notation.
+
+    Cricket notation allows only one decimal digit.
+
+    Valid examples
+
+        0
+        0.0
+        5.2
+        19.5
+        50.0
+
+    Invalid examples
+
+        10.6
+        12.9
+        5.75
+        20.25
+
+    Parameters
+    ----------
+    overs
+        Cricket overs.
+
+    Raises
+    ------
+    ValueError
+        If the notation is invalid.
+    """
+
+    _validate_non_negative(overs, "Overs")
+
+    whole_overs = int(overs)
+
+    fractional_part = overs - whole_overs
+
+    fractional_balls = round(fractional_part * 10)
+
+    #
+    # Reject values having more than one decimal digit.
+    #
+    # Example
+    #
+    #     20.25
+    #
+    # becomes
+    #
+    #     fractional_part * 10 = 2.5
+    #
+    # which is invalid.
+    #
+    if not isclose(
+        fractional_part * 10,
+        fractional_balls,
+        abs_tol=1e-9,
+    ):
+        raise ValueError(
+            "Overs must contain at most one decimal digit."
+        )
+
+    if fractional_balls >= BALLS_PER_OVER:
+        raise ValueError(
+            "Invalid cricket over notation. "
+            "Decimal part cannot exceed 5."
+        )
+
+
 ###############################################################################
-#                         CONVERSION FUNCTIONS
+# Conversion Function Overloads
+###############################################################################
+
+#
+# These overloads improve IDE auto-completion and static type checking.
+# Runtime behaviour remains unchanged.
+#
+
+@overload
+def overs_to_balls(
+    overs: int,
+) -> Balls:
+    ...
+
+
+@overload
+def overs_to_balls(
+    overs: float,
+) -> Balls:
+    ...
+
+
+@overload
+def balls_to_overs(
+    balls: Balls,
+) -> Overs:
+    ...
+
+
+@overload
+def balls_to_overs(
+    balls: int,
+) -> Overs:
+    ...
+
+
+###############################################################################
+# Conversion Functions
 ###############################################################################
 
 
-def overs_to_balls(overs: float) -> Balls:
+def overs_to_balls(
+    overs: int | float,
+) -> Balls:
     """
     Convert cricket overs into legal deliveries.
 
-    Cricket overs are NOT decimal numbers.
+    Cricket overs are not decimal values.
 
     Example
-    -------
 
-    10.3 overs
+        10.3
 
     means
 
@@ -181,17 +347,17 @@ def overs_to_balls(overs: float) -> Balls:
         +
         3 legal deliveries
 
-    NOT
+    and NOT
 
-        10.3 * 6
+        10.3 × 6
 
     Examples
     --------
 
-    >>> overs_to_balls(0.0)
+    >>> overs_to_balls(0)
     0
 
-    >>> overs_to_balls(1.0)
+    >>> overs_to_balls(1)
     6
 
     >>> overs_to_balls(10.3)
@@ -203,13 +369,12 @@ def overs_to_balls(overs: float) -> Balls:
     Parameters
     ----------
     overs
-        Cricket overs.
+        Cricket over notation.
 
     Returns
     -------
     Balls
-
-        Total legal deliveries.
+        Equivalent legal deliveries.
 
     Raises
     ------
@@ -219,29 +384,35 @@ def overs_to_balls(overs: float) -> Balls:
 
         • overs is negative
 
-        • decimal portion exceeds 5
+        • notation contains more than one decimal digit
+
+        • decimal portion exceeds five
     """
 
-    _validate_non_negative(overs, "Overs")
+    _validate_over_notation(overs)
 
     whole_overs = int(overs)
 
-    balls = int(round((overs - whole_overs) * 10))
+    balls = round((overs - whole_overs) * 10)
 
-    if balls >= BALLS_PER_OVER:
-        raise ValueError(
-            "Invalid cricket over notation. "
-            "Decimal part cannot exceed 5."
-        )
+    total_balls = (
+        whole_overs * BALLS_PER_OVER
+    ) + balls
 
-    total = (whole_overs * BALLS_PER_OVER) + balls
-
-    return Balls(total)
+    return Balls(total_balls)
 
 
-def balls_to_overs(balls: int) -> Overs:
+def balls_to_overs(
+    balls: Balls | int,
+) -> Overs:
     """
     Convert legal deliveries into cricket over notation.
+
+    Cricket notation is represented as
+
+        completed_overs.remaining_balls
+
+    rather than as a decimal quantity.
 
     Examples
     --------
@@ -264,20 +435,36 @@ def balls_to_overs(balls: int) -> Overs:
     Parameters
     ----------
     balls
-
         Number of legal deliveries.
 
     Returns
     -------
     Overs
-
-        Cricket notation.
+        Cricket over notation.
 
     Raises
     ------
     ValueError
-
         If balls is negative.
+
+    Notes
+    -----
+    This function intentionally returns cricket notation rather than
+    elapsed decimal overs.
+
+    For example
+
+        19.5
+
+    represents
+
+        19 overs
+        +
+        5 balls
+
+    not
+
+        19.5 decimal overs.
     """
 
     _validate_non_negative(balls, "Balls")
@@ -286,124 +473,18 @@ def balls_to_overs(balls: int) -> Overs:
 
     remaining_balls = balls % BALLS_PER_OVER
 
-    over_value = float(f"{completed_overs}.{remaining_balls}")
+    #
+    # Construct cricket notation.
+    #
+    # Example
+    #
+    #     19 overs
+    #     5 balls
+    #
+    # becomes
+    #
+    #     19.5
+    #
+    over_value = completed_overs + (remaining_balls / 10)
 
     return Overs(over_value)
-
-
-###############################################################################
-#                      DELIVERY VALIDATION FUNCTIONS
-###############################################################################
-
-
-def is_legal_delivery(delivery_type: str) -> bool:
-    """
-    Determine whether a delivery counts as a legal ball.
-
-    Legal deliveries increment
-
-        • over
-        • ball number
-
-    Illegal deliveries
-
-        • Wide
-        • No Ball
-
-    do NOT count towards the over.
-
-    Parameters
-    ----------
-    delivery_type
-
-        Type of delivery.
-
-    Returns
-    -------
-    bool
-
-        True if legal.
-
-    Raises
-    ------
-    ValueError
-
-        Unknown delivery type.
-    """
-
-    if delivery_type not in ALL_DELIVERY_TYPES:
-        raise ValueError(
-            f"Unknown delivery type '{delivery_type}'."
-        )
-
-    return delivery_type in LEGAL_DELIVERY_TYPES
-
-
-def legal_deliveries(delivery_types: list[str]) -> Balls:
-    """
-    Count legal deliveries in a sequence.
-
-    This helper is commonly used while rebuilding an innings from
-    the event log.
-
-    Example
-    -------
-
-    >>> legal_deliveries([
-    ...     "Normal",
-    ...     "Wide",
-    ...     "Normal",
-    ...     "No Ball",
-    ... ])
-    2
-
-    Parameters
-    ----------
-    delivery_types
-
-        Ordered list of delivery types.
-
-    Returns
-    -------
-    Balls
-
-        Number of legal deliveries.
-
-    Raises
-    ------
-    ValueError
-
-        If an unknown delivery type is encountered.
-    """
-
-    count = 0
-
-    for delivery in delivery_types:
-
-        if is_legal_delivery(delivery):
-            count += 1
-
-    return Balls(count)
-
-
-###############################################################################
-#                         MODULE EXPORTS
-###############################################################################
-
-__all__ = [
-    "Runs",
-    "Balls",
-    "Overs",
-    "Wickets",
-    "BALLS_PER_OVER",
-    "MAX_WICKETS",
-    "MatchStatus",
-    "TossDecision",
-    "LEGAL_DELIVERY_TYPES",
-    "ILLEGAL_DELIVERY_TYPES",
-    "ALL_DELIVERY_TYPES",
-    "overs_to_balls",
-    "balls_to_overs",
-    "is_legal_delivery",
-    "legal_deliveries",
-]
