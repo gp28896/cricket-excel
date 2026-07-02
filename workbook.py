@@ -4636,3 +4636,373 @@ from openpyxl.utils.cell import rows_from_range
             _LOG_MESSAGE_PREFIX,
             len(values),
         )
+
+
+###############################################################################
+# WorkbookBuilder - Public API and convenience interface
+###############################################################################
+
+from pathlib import Path
+from typing import BinaryIO, Final, Self
+
+from openpyxl import load_workbook as _load_workbook
+
+
+    def build_workbook(self) -> Workbook:
+        """Build and initialize a workbook.
+
+        This is the primary public entry point for workbook construction.
+        The method orchestrates all initialization phases implemented by
+        previous builder methods.
+
+        The workflow intentionally delegates to reusable helper methods so
+        subclasses may override individual phases without changing the public
+        API.
+
+        Returns:
+            The fully initialized workbook instance.
+
+        Raises:
+            RuntimeError:
+                If workbook creation fails.
+        """
+        self._logger.info(
+            "%s Starting workbook build.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+        if self._workbook is None:
+            self.create_workbook()
+
+        self.initialize_workbook()
+        self.initialize_internal_state()
+
+        try:
+            self.initialize_styles()
+        except Exception:
+            self._logger.exception(
+                "%s Style initialization failed.",
+                _LOG_MESSAGE_PREFIX,
+            )
+            raise
+
+        try:
+            self.register_standard_ranges()
+        except Exception:
+            self._logger.exception(
+                "%s Named range registration failed.",
+                _LOG_MESSAGE_PREFIX,
+            )
+            raise
+
+        try:
+            self.apply_standard_validations()
+        except Exception:
+            self._logger.exception(
+                "%s Validation initialization failed.",
+                _LOG_MESSAGE_PREFIX,
+            )
+            raise
+
+        self._logger.info(
+            "%s Workbook build completed.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+        return self.workbook
+
+    def save_workbook(
+        self,
+        filename: str | Path | BinaryIO,
+    ) -> None:
+        """Save the workbook.
+
+        Args:
+            filename:
+                File path or writable binary file object.
+
+        Raises:
+            RuntimeError:
+                If no workbook has been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._logger.info(
+            "%s Saving workbook to %s.",
+            _LOG_MESSAGE_PREFIX,
+            filename,
+        )
+
+        self._workbook.save(filename)
+
+    def load_workbook(
+        self,
+        filename: str | Path,
+        *,
+        read_only: bool = False,
+        keep_vba: bool = False,
+        data_only: bool = False,
+    ) -> Workbook:
+        """Load an existing workbook.
+
+        The worksheet registry is automatically rebuilt after loading.
+
+        Args:
+            filename:
+                Workbook filename.
+
+            read_only:
+                Open workbook in read-only mode.
+
+            keep_vba:
+                Preserve VBA content.
+
+            data_only:
+                Read cached formula values.
+
+        Returns:
+            Loaded workbook.
+        """
+        self._logger.info(
+            "%s Loading workbook %s.",
+            _LOG_MESSAGE_PREFIX,
+            filename,
+        )
+
+        self._workbook = _load_workbook(
+            filename=filename,
+            read_only=read_only,
+            keep_vba=keep_vba,
+            data_only=data_only,
+        )
+
+        self._worksheet_registry.clear()
+
+        for worksheet in self._workbook.worksheets:
+            self._worksheet_registry[worksheet.title] = worksheet
+
+        return self._workbook
+
+    def export_workbook(
+        self,
+        filename: str | Path,
+    ) -> Path:
+        """Build and export a workbook.
+
+        This convenience method combines workbook construction and saving.
+
+        Args:
+            filename:
+                Destination filename.
+
+        Returns:
+            Normalized output path.
+        """
+        output = Path(filename)
+
+        self.build_workbook()
+        self.save_workbook(output)
+
+        self._logger.info(
+            "%s Workbook exported to %s.",
+            _LOG_MESSAGE_PREFIX,
+            output,
+        )
+
+        return output
+
+    def __enter__(self) -> Self:
+        """Enter the builder context.
+
+        Returns:
+            The builder instance.
+        """
+        if self._workbook is None:
+            self.create_workbook()
+
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: object | None,
+    ) -> bool:
+        """Exit the builder context.
+
+        Args:
+            exc_type:
+                Exception type.
+
+            exc_value:
+                Exception instance.
+
+            traceback:
+                Traceback object.
+
+        Returns:
+            ``False`` so any exception is propagated.
+        """
+        if exc_type is not None:
+            self._logger.exception(
+                "%s Workbook builder exited with an exception.",
+                _LOG_MESSAGE_PREFIX,
+                exc_info=(exc_type, exc_value, traceback),
+            )
+
+        return False
+
+
+###############################################################################
+# Convenience functions
+###############################################################################
+
+def build_workbook(
+    config: WorkbookConfig | None = None,
+) -> Workbook:
+    """Build a workbook using the default builder.
+
+    Args:
+        config:
+            Optional workbook configuration.
+
+    Returns:
+        Newly built workbook.
+    """
+    builder = WorkbookBuilder(config or WorkbookConfig())
+    return builder.build_workbook()
+
+
+def create_workbook_builder(
+    config: WorkbookConfig | None = None,
+) -> WorkbookBuilder:
+    """Create a configured workbook builder.
+
+    Args:
+        config:
+            Optional workbook configuration.
+
+    Returns:
+        Configured :class:`WorkbookBuilder`.
+    """
+    return WorkbookBuilder(config or WorkbookConfig())
+
+
+###############################################################################
+# Public exports
+###############################################################################
+
+__all__ = [
+    "WorkbookConfig",
+    "WorkbookBuilder",
+    "build_workbook",
+    "create_workbook_builder",
+]
+
+###############################################################################
+# Module finalization
+###############################################################################
+"""
+Workbook Module Finalization
+============================
+
+This section completes the public surface of ``workbook.py``.
+
+Design Goals
+------------
+The module intentionally acts as the orchestration layer of the project.
+
+Responsibilities include:
+
+* workbook lifecycle management
+* worksheet lifecycle management
+* style integration
+* validation integration
+* formula integration
+* workbook metadata
+* workbook navigation
+* workbook protection
+* reusable workbook utilities
+
+Responsibilities intentionally excluded from this module:
+
+* cricket-specific business rules
+* scoring logic
+* validation implementations
+* formula implementations
+* style definitions
+* application constants
+
+Those responsibilities remain delegated to their dedicated project modules.
+
+Module Compatibility
+--------------------
+This module has been designed to integrate with:
+
+* ``constants.py`` — application constants and configuration values
+* ``styles.py`` — reusable NamedStyle registration and styling helpers
+* ``validation.py`` — reusable validation builders
+* ``formulas.py`` — reusable Excel formula helpers
+
+No business logic from those modules should be duplicated here.
+
+Public API
+----------
+The supported public API consists of:
+
+* WorkbookConfig
+* WorkbookBuilder
+* build_workbook()
+* create_workbook_builder()
+
+Everything else should be considered an implementation detail unless
+explicitly documented otherwise.
+
+Python Compatibility
+--------------------
+Designed for:
+
+* Python 3.12+
+* openpyxl 3.1+
+
+Implementation Notes
+--------------------
+WorkbookBuilder intentionally centralizes orchestration while delegating
+specialized functionality to the corresponding project modules. This
+keeps responsibilities well separated and minimizes maintenance overhead
+as the project grows.
+"""
+
+###############################################################################
+# Public API verification
+###############################################################################
+
+# Normalize exports to ensure a stable public interface.
+__all__ = tuple(
+    dict.fromkeys(
+        (
+            "WorkbookConfig",
+            "WorkbookBuilder",
+            "build_workbook",
+            "create_workbook_builder",
+        )
+    )
+)
+
+###############################################################################
+# Compatibility verification metadata
+###############################################################################
+
+# These module references are intentionally retained so static analysis tools
+# and future maintenance can easily verify the expected integration points.
+_MODULE_COMPATIBILITY: Final[tuple[str, ...]] = (
+    "constants",
+    "styles",
+    "validation",
+    "formulas",
+)
+
+###############################################################################
+# End of workbook.py
+###############################################################################
