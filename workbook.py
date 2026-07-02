@@ -1630,3 +1630,3009 @@ from openpyxl.styles import NamedStyle
         raise TypeError(
             "Column reference must be an integer or Excel column letter."
         )
+
+
+###############################################################################
+# WorkbookBuilder - Worksheet management
+###############################################################################
+
+    def create_sheet(
+        self,
+        title: str,
+        *,
+        index: int | None = None,
+    ) -> WorksheetType:
+        """Create and register a worksheet.
+
+        The worksheet registry maintained by :class:`WorkbookBuilder` is treated
+        as the authoritative source for workbook worksheets. Every worksheet
+        created through this method is automatically registered.
+
+        Args:
+            title:
+                Worksheet title.
+
+            index:
+                Optional insertion index.
+
+        Returns:
+            The newly created worksheet.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+
+            ValueError:
+                If the worksheet title is invalid or already exists.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        title = title.strip()
+
+        if not title:
+            raise ValueError("Worksheet title cannot be empty.")
+
+        if self.sheet_exists(title):
+            raise ValueError(f"Worksheet '{title}' already exists.")
+
+        worksheet = self._workbook.create_sheet(
+            title=title,
+            index=index,
+        )
+
+        self._worksheet_registry[title] = worksheet
+
+        self._logger.info(
+            "%s Created worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            title,
+        )
+
+        return worksheet
+
+    def get_sheet(
+        self,
+        title: str,
+    ) -> WorksheetType:
+        """Return a registered worksheet.
+
+        Args:
+            title:
+                Worksheet title.
+
+        Returns:
+            Registered worksheet.
+
+        Raises:
+            KeyError:
+                If the worksheet is not registered.
+        """
+        try:
+            return self._worksheet_registry[title]
+        except KeyError as exc:
+            raise KeyError(
+                f"Worksheet '{title}' is not registered."
+            ) from exc
+
+    def rename_sheet(
+        self,
+        current_title: str,
+        new_title: str,
+    ) -> WorksheetType:
+        """Rename a registered worksheet.
+
+        Args:
+            current_title:
+                Existing worksheet title.
+
+            new_title:
+                New worksheet title.
+
+        Returns:
+            The renamed worksheet.
+
+        Raises:
+            KeyError:
+                If the worksheet does not exist.
+
+            ValueError:
+                If the new title is invalid or already exists.
+        """
+        worksheet = self.get_sheet(current_title)
+
+        new_title = new_title.strip()
+
+        if not new_title:
+            raise ValueError("Worksheet title cannot be empty.")
+
+        if (
+            new_title != current_title
+            and self.sheet_exists(new_title)
+        ):
+            raise ValueError(
+                f"Worksheet '{new_title}' already exists."
+            )
+
+        worksheet.title = new_title
+
+        del self._worksheet_registry[current_title]
+        self._worksheet_registry[new_title] = worksheet
+
+        self._logger.info(
+            "%s Renamed worksheet '%s' -> '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            current_title,
+            new_title,
+        )
+
+        return worksheet
+
+    def delete_sheet(
+        self,
+        title: str,
+    ) -> None:
+        """Delete a registered worksheet.
+
+        Args:
+            title:
+                Worksheet title.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+
+            KeyError:
+                If the worksheet is unknown.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        worksheet = self.get_sheet(title)
+
+        self._workbook.remove(worksheet)
+        del self._worksheet_registry[title]
+
+        self._logger.info(
+            "%s Deleted worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            title,
+        )
+
+    def move_sheet(
+        self,
+        title: str,
+        offset: int,
+    ) -> WorksheetType:
+        """Move a worksheet within the workbook.
+
+        Args:
+            title:
+                Worksheet title.
+
+            offset:
+                Relative movement. Positive values move the worksheet
+                toward the end of the workbook while negative values move
+                it toward the beginning.
+
+        Returns:
+            The moved worksheet.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        worksheet = self.get_sheet(title)
+
+        self._workbook.move_sheet(
+            worksheet,
+            offset=offset,
+        )
+
+        self._logger.debug(
+            "%s Moved worksheet '%s' (offset=%d).",
+            _LOG_MESSAGE_PREFIX,
+            title,
+            offset,
+        )
+
+        return worksheet
+
+    def sheet_exists(
+        self,
+        title: str,
+    ) -> bool:
+        """Determine whether a worksheet is registered.
+
+        Args:
+            title:
+                Worksheet title.
+
+        Returns:
+            ``True`` if the worksheet exists.
+        """
+        return title in self._worksheet_registry
+
+    def list_sheets(self) -> tuple[str, ...]:
+        """Return registered worksheet names.
+
+        Returns:
+            Immutable tuple preserving registry insertion order.
+        """
+        return tuple(self._worksheet_registry.keys())
+
+    def hide_sheet(
+        self,
+        title: str,
+    ) -> WorksheetType:
+        """Hide a worksheet.
+
+        Args:
+            title:
+                Worksheet title.
+
+        Returns:
+            The modified worksheet.
+        """
+        worksheet = self.get_sheet(title)
+
+        worksheet.sheet_state = "hidden"
+
+        self._logger.debug(
+            "%s Hid worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            title,
+        )
+
+        return worksheet
+
+    def unhide_sheet(
+        self,
+        title: str,
+    ) -> WorksheetType:
+        """Make a worksheet visible.
+
+        Args:
+            title:
+                Worksheet title.
+
+        Returns:
+            The modified worksheet.
+        """
+        worksheet = self.get_sheet(title)
+
+        worksheet.sheet_state = "visible"
+
+        self._logger.debug(
+            "%s Unhid worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            title,
+        )
+
+        return worksheet
+
+    def very_hide_sheet(
+        self,
+        title: str,
+    ) -> WorksheetType:
+        """Mark a worksheet as very hidden.
+
+        A very hidden worksheet cannot normally be made visible through the
+        Excel user interface.
+
+        Args:
+            title:
+                Worksheet title.
+
+        Returns:
+            The modified worksheet.
+        """
+        worksheet = self.get_sheet(title)
+
+        worksheet.sheet_state = "veryHidden"
+
+        self._logger.debug(
+            "%s Very-hid worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            title,
+        )
+
+        return worksheet
+
+
+###############################################################################
+# WorkbookBuilder - Named range management
+###############################################################################
+
+from openpyxl.workbook.defined_name import DefinedName
+
+
+    def create_named_range(
+        self,
+        name: str,
+        reference: str,
+        *,
+        comment: str | None = None,
+    ) -> DefinedName:
+        """Create and register a workbook-level named range.
+
+        If a named range having the supplied name already exists, a
+        :class:`ValueError` is raised.
+
+        Args:
+            name:
+                Workbook-scoped defined name.
+
+            reference:
+                Excel reference (for example ``'Teams'!$A$2:$A$100``).
+
+            comment:
+                Optional descriptive comment.
+
+        Returns:
+            The created :class:`~openpyxl.workbook.defined_name.DefinedName`.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not yet been created.
+
+            ValueError:
+                If the supplied arguments are invalid or the name already
+                exists.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        name = name.strip()
+        reference = reference.strip()
+
+        if not name:
+            raise ValueError("Named range name cannot be empty.")
+
+        if not reference:
+            raise ValueError("Named range reference cannot be empty.")
+
+        if self.named_range_exists(name):
+            raise ValueError(f"Named range '{name}' already exists.")
+
+        defined_name = DefinedName(
+            name=name,
+            attr_text=reference,
+            comment=comment,
+        )
+
+        self._workbook.defined_names.add(defined_name)
+
+        self._logger.info(
+            "%s Registered named range '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            name,
+        )
+
+        return defined_name
+
+    def update_named_range(
+        self,
+        name: str,
+        reference: str,
+    ) -> DefinedName:
+        """Update the reference of an existing named range.
+
+        Args:
+            name:
+                Existing defined name.
+
+            reference:
+                New Excel reference.
+
+        Returns:
+            The updated defined name.
+
+        Raises:
+            KeyError:
+                If the named range does not exist.
+        """
+        defined_name = self.get_named_range(name)
+        defined_name.attr_text = reference
+
+        self._logger.info(
+            "%s Updated named range '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            name,
+        )
+
+        return defined_name
+
+    def delete_named_range(
+        self,
+        name: str,
+    ) -> None:
+        """Delete a workbook-level named range.
+
+        Args:
+            name:
+                Name of the defined name.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+
+            KeyError:
+                If the named range does not exist.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        if not self.named_range_exists(name):
+            raise KeyError(f"Named range '{name}' does not exist.")
+
+        del self._workbook.defined_names[name]
+
+        self._logger.info(
+            "%s Deleted named range '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            name,
+        )
+
+    def get_named_range(
+        self,
+        name: str,
+    ) -> DefinedName:
+        """Return a workbook-level named range.
+
+        Args:
+            name:
+                Defined name.
+
+        Returns:
+            Matching :class:`DefinedName`.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+
+            KeyError:
+                If the named range is not found.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        defined_name = self._workbook.defined_names.get(name)
+
+        if defined_name is None:
+            raise KeyError(f"Named range '{name}' does not exist.")
+
+        return defined_name
+
+    def named_range_exists(
+        self,
+        name: str,
+    ) -> bool:
+        """Determine whether a workbook named range exists.
+
+        Args:
+            name:
+                Defined name.
+
+        Returns:
+            ``True`` if the defined name exists.
+        """
+        if self._workbook is None:
+            return False
+
+        return self._workbook.defined_names.get(name) is not None
+
+    def register_standard_ranges(self) -> None:
+        """Register application-standard workbook named ranges.
+
+        This method is intentionally generic and does not create
+        worksheet-specific ranges. Later workbook construction phases may
+        extend or override this method to register ranges required by the
+        cricket tournament workbook.
+
+        If a compatible registration helper exists inside ``constants.py``,
+        it will be used automatically.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._logger.debug(
+            "%s Registering standard named ranges.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+        register = getattr(constants, "STANDARD_NAMED_RANGES", None)
+
+        if isinstance(register, dict):
+            for name, reference in register.items():
+                if not self.named_range_exists(name):
+                    self.create_named_range(
+                        name=name,
+                        reference=str(reference),
+                    )
+
+        self._logger.info(
+            "%s Standard named range registration complete.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+
+
+###############################################################################
+# WorkbookBuilder - Freeze pane utilities
+###############################################################################
+
+    def freeze_top_row(
+        self,
+        worksheet: WorksheetType,
+    ) -> None:
+        """Freeze the first row of a worksheet.
+
+        Excel freezes all rows above the specified cell. Setting the freeze
+        pane to ``A2`` keeps the first row visible while scrolling.
+
+        Args:
+            worksheet:
+                Target worksheet.
+        """
+        worksheet.freeze_panes = "A2"
+
+        self._logger.debug(
+            "%s Applied top-row freeze to worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def freeze_first_column(
+        self,
+        worksheet: WorksheetType,
+    ) -> None:
+        """Freeze the first column of a worksheet.
+
+        Excel freezes all columns to the left of the specified cell. Setting
+        the freeze pane to ``B1`` keeps the first column visible while
+        horizontally scrolling.
+
+        Args:
+            worksheet:
+                Target worksheet.
+        """
+        worksheet.freeze_panes = "B1"
+
+        self._logger.debug(
+            "%s Applied first-column freeze to worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def freeze_custom(
+        self,
+        worksheet: WorksheetType,
+        cell_reference: str,
+    ) -> None:
+        """Apply a custom freeze pane location.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            cell_reference:
+                Excel cell reference that defines the first scrollable cell,
+                such as ``B2`` or ``D5``.
+
+        Raises:
+            ValueError:
+                If the supplied cell reference is empty.
+        """
+        reference = cell_reference.strip().upper()
+
+        if not reference:
+            raise ValueError("Cell reference cannot be empty.")
+
+        worksheet.freeze_panes = reference
+
+        self._logger.debug(
+            "%s Applied custom freeze '%s' to worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            reference,
+            worksheet.title,
+        )
+
+    def clear_freeze(
+        self,
+        worksheet: WorksheetType,
+    ) -> None:
+        """Remove any freeze pane configuration.
+
+        Args:
+            worksheet:
+                Target worksheet.
+        """
+        worksheet.freeze_panes = None
+
+        self._logger.debug(
+            "%s Cleared freeze panes for worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def apply_default_freeze(
+        self,
+        worksheet: WorksheetType,
+    ) -> None:
+        """Apply the project's default freeze pane configuration.
+
+        The default implementation freezes the first row, which is suitable for
+        the majority of tabular worksheets. Subclasses may override this method
+        to provide worksheet-specific behaviour while retaining a consistent
+        public interface.
+
+        Args:
+            worksheet:
+                Target worksheet.
+        """
+        self.freeze_top_row(worksheet)
+
+        self._logger.debug(
+            "%s Applied default freeze configuration to worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+
+###############################################################################
+# WorkbookBuilder - Print configuration utilities
+###############################################################################
+
+    def set_print_area(
+        self,
+        worksheet: WorksheetType,
+        print_area: str,
+    ) -> None:
+        """Configure the worksheet print area.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            print_area:
+                Excel range defining the printable area (for example
+                ``A1:H50``).
+
+        Raises:
+            ValueError:
+                If the supplied print area is empty.
+        """
+        area = print_area.strip()
+
+        if not area:
+            raise ValueError("print_area cannot be empty.")
+
+        worksheet.print_area = area
+
+        self._logger.debug(
+            "%s Set print area for worksheet '%s' to '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+            area,
+        )
+
+    def set_repeat_rows(
+        self,
+        worksheet: WorksheetType,
+        rows: str,
+    ) -> None:
+        """Configure rows to repeat on every printed page.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            rows:
+                Excel row reference such as ``1:1`` or ``1:3``.
+
+        Raises:
+            ValueError:
+                If the supplied row specification is empty.
+        """
+        repeat_rows = rows.strip()
+
+        if not repeat_rows:
+            raise ValueError("rows cannot be empty.")
+
+        worksheet.print_title_rows = repeat_rows
+
+        self._logger.debug(
+            "%s Set repeating rows for worksheet '%s' to '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+            repeat_rows,
+        )
+
+    def set_repeat_columns(
+        self,
+        worksheet: WorksheetType,
+        columns: str,
+    ) -> None:
+        """Configure columns to repeat on every printed page.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            columns:
+                Excel column reference such as ``A:A`` or ``A:C``.
+
+        Raises:
+            ValueError:
+                If the supplied column specification is empty.
+        """
+        repeat_columns = columns.strip().upper()
+
+        if not repeat_columns:
+            raise ValueError("columns cannot be empty.")
+
+        worksheet.print_title_cols = repeat_columns
+
+        self._logger.debug(
+            "%s Set repeating columns for worksheet '%s' to '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+            repeat_columns,
+        )
+
+    def set_print_titles(
+        self,
+        worksheet: WorksheetType,
+        *,
+        rows: str | None = None,
+        columns: str | None = None,
+    ) -> None:
+        """Configure repeating print titles.
+
+        This convenience method combines
+        :meth:`set_repeat_rows` and
+        :meth:`set_repeat_columns`.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            rows:
+                Optional repeating row specification.
+
+            columns:
+                Optional repeating column specification.
+        """
+        if rows is not None:
+            self.set_repeat_rows(worksheet, rows)
+
+        if columns is not None:
+            self.set_repeat_columns(worksheet, columns)
+
+    def set_fit_to_page(
+        self,
+        worksheet: WorksheetType,
+        *,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> None:
+        """Configure fit-to-page printing.
+
+        When an argument is omitted, the corresponding default from
+        :class:`WorkbookConfig` is used.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            width:
+                Number of pages wide.
+
+            height:
+                Number of pages tall.
+
+        Raises:
+            ValueError:
+                If width or height is negative.
+        """
+        fit_width = (
+            self._config.fit_to_width if width is None else width
+        )
+        fit_height = (
+            self._config.fit_to_height if height is None else height
+        )
+
+        if fit_width < 0:
+            raise ValueError("width cannot be negative.")
+
+        if fit_height < 0:
+            raise ValueError("height cannot be negative.")
+
+        worksheet.page_setup.fitToPage = self._config.fit_to_page
+        worksheet.page_setup.fitToWidth = fit_width
+        worksheet.page_setup.fitToHeight = fit_height
+
+        self._logger.debug(
+            "%s Configured fit-to-page for worksheet '%s' "
+            "(width=%d, height=%d).",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+            fit_width,
+            fit_height,
+        )
+
+    def set_scale(
+        self,
+        worksheet: WorksheetType,
+        scale: int,
+    ) -> None:
+        """Configure print scaling.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            scale:
+                Print scaling percentage.
+
+        Raises:
+            ValueError:
+                If the scale is outside Excel's supported range
+                (10-400 percent).
+        """
+        if not 10 <= scale <= 400:
+            raise ValueError(
+                "scale must be between 10 and 400."
+            )
+
+        worksheet.page_setup.scale = scale
+
+        self._logger.debug(
+            "%s Set print scale for worksheet '%s' to %d%%.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+            scale,
+        )
+
+    def center_on_page(
+        self,
+        worksheet: WorksheetType,
+        *,
+        horizontal: bool | None = None,
+        vertical: bool | None = None,
+    ) -> None:
+        """Configure page centering.
+
+        When arguments are omitted, defaults from
+        :class:`WorkbookConfig` are used.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            horizontal:
+                Enable horizontal centering.
+
+            vertical:
+                Enable vertical centering.
+        """
+        worksheet.print_options.horizontalCentered = (
+            self._config.center_horizontally
+            if horizontal is None
+            else horizontal
+        )
+
+        worksheet.print_options.verticalCentered = (
+            self._config.center_vertically
+            if vertical is None
+            else vertical
+        )
+
+        self._logger.debug(
+            "%s Updated page centering for worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+
+
+###############################################################################
+# WorkbookBuilder - Page setup helpers
+###############################################################################
+
+from openpyxl.worksheet.page import PageMargins
+from openpyxl.worksheet.header_footer import HeaderFooter
+
+
+    def set_page_orientation(
+        self,
+        worksheet: WorksheetType,
+        orientation: str,
+    ) -> None:
+        """Set the page orientation for a worksheet.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            orientation:
+                Either ``"portrait"`` or ``"landscape"``.
+
+        Raises:
+            ValueError:
+                If an unsupported orientation is supplied.
+        """
+        orientation = orientation.strip().lower()
+
+        valid_orientations = {"portrait", "landscape"}
+
+        if orientation not in valid_orientations:
+            raise ValueError(
+                f"Unsupported page orientation: {orientation!r}."
+            )
+
+        worksheet.page_setup.orientation = orientation
+
+        self._logger.debug(
+            "%s Set page orientation for worksheet '%s' to '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+            orientation,
+        )
+
+    def set_paper_size(
+        self,
+        worksheet: WorksheetType,
+        paper_size: int,
+    ) -> None:
+        """Configure the worksheet paper size.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            paper_size:
+                OpenXML paper size constant supported by ``openpyxl``.
+                For example::
+
+                    1   Letter
+                    8   A3
+                    9   A4
+                    11  A5
+
+        Raises:
+            ValueError:
+                If the paper size identifier is invalid.
+        """
+        if paper_size <= 0:
+            raise ValueError("paper_size must be greater than zero.")
+
+        worksheet.page_setup.paperSize = paper_size
+
+        self._logger.debug(
+            "%s Set paper size for worksheet '%s' to %d.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+            paper_size,
+        )
+
+    def set_page_margins(
+        self,
+        worksheet: WorksheetType,
+        *,
+        left: float = 0.7,
+        right: float = 0.7,
+        top: float = 0.75,
+        bottom: float = 0.75,
+        header: float = 0.3,
+        footer: float = 0.3,
+    ) -> None:
+        """Configure worksheet page margins.
+
+        Margin values are specified in inches.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            left:
+                Left margin.
+
+            right:
+                Right margin.
+
+            top:
+                Top margin.
+
+            bottom:
+                Bottom margin.
+
+            header:
+                Header margin.
+
+            footer:
+                Footer margin.
+
+        Raises:
+            ValueError:
+                If any margin is negative.
+        """
+        margins = {
+            "left": left,
+            "right": right,
+            "top": top,
+            "bottom": bottom,
+            "header": header,
+            "footer": footer,
+        }
+
+        for name, value in margins.items():
+            if value < 0:
+                raise ValueError(f"{name} margin cannot be negative.")
+
+        worksheet.page_margins = PageMargins(
+            left=left,
+            right=right,
+            top=top,
+            bottom=bottom,
+            header=header,
+            footer=footer,
+        )
+
+        self._logger.debug(
+            "%s Updated page margins for worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def set_headers(
+        self,
+        worksheet: WorksheetType,
+        *,
+        left: str = "",
+        center: str = "",
+        right: str = "",
+    ) -> None:
+        """Configure worksheet page headers.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            left:
+                Left header text.
+
+            center:
+                Centre header text.
+
+            right:
+                Right header text.
+        """
+        worksheet.HeaderFooter = HeaderFooter()
+
+        worksheet.oddHeader.left.text = left
+        worksheet.oddHeader.center.text = center
+        worksheet.oddHeader.right.text = right
+
+        self._logger.debug(
+            "%s Updated headers for worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def set_footers(
+        self,
+        worksheet: WorksheetType,
+        *,
+        left: str = "",
+        center: str = "",
+        right: str = "",
+    ) -> None:
+        """Configure worksheet page footers.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            left:
+                Left footer text.
+
+            center:
+                Centre footer text.
+
+            right:
+                Right footer text.
+        """
+        worksheet.HeaderFooter = HeaderFooter()
+
+        worksheet.oddFooter.left.text = left
+        worksheet.oddFooter.center.text = center
+        worksheet.oddFooter.right.text = right
+
+        self._logger.debug(
+            "%s Updated footers for worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def set_page_numbering(
+        self,
+        worksheet: WorksheetType,
+        *,
+        first_page_number: int = 1,
+        use_first_page_number: bool = True,
+    ) -> None:
+        """Configure worksheet page numbering.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            first_page_number:
+                Starting page number.
+
+            use_first_page_number:
+                Whether Excel should honour the supplied first page number.
+
+        Raises:
+            ValueError:
+                If the first page number is less than one.
+        """
+        if first_page_number < 1:
+            raise ValueError(
+                "first_page_number must be greater than or equal to 1."
+            )
+
+        worksheet.page_setup.firstPageNumber = first_page_number
+        worksheet.page_setup.useFirstPageNumber = use_first_page_number
+
+        self._logger.debug(
+            "%s Configured page numbering for worksheet '%s' "
+            "(first page=%d).",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+            first_page_number,
+        )
+
+
+
+###############################################################################
+# WorkbookBuilder - Protection utilities
+###############################################################################
+
+    def protect_sheet(
+        self,
+        worksheet: WorksheetType,
+        *,
+        password: str | None = None,
+        select_locked_cells: bool | None = None,
+        select_unlocked_cells: bool | None = None,
+    ) -> None:
+        """Enable worksheet protection.
+
+        The protection options default to the values defined in
+        :class:`WorkbookConfig` when not explicitly supplied.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            password:
+                Optional worksheet protection password.
+
+            select_locked_cells:
+                Whether locked cells may be selected.
+
+            select_unlocked_cells:
+                Whether unlocked cells may be selected.
+        """
+        protection = worksheet.protection
+
+        protection.sheet = True
+
+        protection.selectLockedCells = (
+            self._config.allow_select_locked_cells
+            if select_locked_cells is None
+            else select_locked_cells
+        )
+
+        protection.selectUnlockedCells = (
+            self._config.allow_select_unlocked_cells
+            if select_unlocked_cells is None
+            else select_unlocked_cells
+        )
+
+        if password:
+            protection.set_password(password)
+
+        self._logger.debug(
+            "%s Enabled protection for worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def unprotect_sheet(
+        self,
+        worksheet: WorksheetType,
+    ) -> None:
+        """Disable worksheet protection.
+
+        Args:
+            worksheet:
+                Target worksheet.
+        """
+        worksheet.protection.sheet = False
+
+        self._logger.debug(
+            "%s Disabled protection for worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def protect_workbook(
+        self,
+        *,
+        password: str | None = None,
+        lock_structure: bool | None = None,
+        lock_windows: bool | None = None,
+    ) -> None:
+        """Enable workbook-level protection.
+
+        Args:
+            password:
+                Optional workbook password.
+
+            lock_structure:
+                Protect workbook structure.
+
+            lock_windows:
+                Protect workbook window layout.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        security = self._workbook.security
+
+        security.lockStructure = (
+            self._config.structure_protection
+            if lock_structure is None
+            else lock_structure
+        )
+
+        security.lockWindows = (
+            self._config.windows_protection
+            if lock_windows is None
+            else lock_windows
+        )
+
+        if password:
+            security.workbookPassword = password
+
+        self._logger.debug(
+            "%s Workbook protection enabled.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def unlock_range(
+        self,
+        worksheet: WorksheetType,
+        cell_range: str,
+    ) -> None:
+        """Unlock every cell within a worksheet range.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            cell_range:
+                Excel cell range (for example ``B2:E20``).
+        """
+        for row in worksheet[cell_range]:
+            for cell in row:
+                cell.protection = Protection(
+                    locked=False,
+                    hidden=cell.protection.hidden,
+                )
+
+        self._logger.debug(
+            "%s Unlocked range '%s' on worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            cell_range,
+            worksheet.title,
+        )
+
+    def lock_range(
+        self,
+        worksheet: WorksheetType,
+        cell_range: str,
+    ) -> None:
+        """Lock every cell within a worksheet range.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            cell_range:
+                Excel cell range (for example ``A1:Z100``).
+        """
+        for row in worksheet[cell_range]:
+            for cell in row:
+                cell.protection = Protection(
+                    locked=True,
+                    hidden=cell.protection.hidden,
+                )
+
+        self._logger.debug(
+            "%s Locked range '%s' on worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            cell_range,
+            worksheet.title,
+        )
+
+    def apply_default_protection(self) -> None:
+        """Apply the default workbook protection configuration.
+
+        This helper applies workbook-level protection using the defaults
+        defined in :class:`WorkbookConfig`. If worksheet protection is enabled
+        by configuration, protection is also applied to all registered
+        worksheets.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        if self._config.workbook_protection_enabled:
+            self.protect_workbook()
+
+        if self._config.default_sheet_protection:
+            for worksheet in self._worksheet_registry.values():
+                self.protect_sheet(worksheet)
+
+        self._logger.info(
+            "%s Applied default workbook protection settings.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+
+###############################################################################
+# WorkbookBuilder - Workbook metadata helpers
+###############################################################################
+
+from datetime import UTC, datetime
+
+
+    def set_title(
+        self,
+        title: str,
+    ) -> None:
+        """Set the workbook title.
+
+        Args:
+            title:
+                Human-readable workbook title.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+
+            ValueError:
+                If *title* is empty.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        title = title.strip()
+
+        if not title:
+            raise ValueError("Workbook title cannot be empty.")
+
+        self._workbook.properties.title = title
+
+        self._logger.debug(
+            "%s Workbook title set to '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            title,
+        )
+
+    def set_subject(
+        self,
+        subject: str,
+    ) -> None:
+        """Set the workbook subject.
+
+        Args:
+            subject:
+                Workbook subject.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._workbook.properties.subject = subject.strip()
+
+        self._logger.debug(
+            "%s Workbook subject updated.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def set_author(
+        self,
+        author: str,
+    ) -> None:
+        """Set the workbook author.
+
+        The value is written to both the creator and last-modified-by
+        document properties.
+
+        Args:
+            author:
+                Author name.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        author = author.strip()
+
+        self._workbook.properties.creator = author
+        self._workbook.properties.lastModifiedBy = author
+
+        self._logger.debug(
+            "%s Workbook author updated.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def set_manager(
+        self,
+        manager: str,
+    ) -> None:
+        """Set the workbook manager.
+
+        Args:
+            manager:
+                Manager name.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._workbook.properties.manager = manager.strip()
+
+        self._logger.debug(
+            "%s Workbook manager updated.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def set_company(
+        self,
+        company: str,
+    ) -> None:
+        """Set the workbook company.
+
+        Args:
+            company:
+                Company or organization name.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._workbook.properties.company = company.strip()
+
+        self._logger.debug(
+            "%s Workbook company updated.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def set_category(
+        self,
+        category: str,
+    ) -> None:
+        """Set the workbook category.
+
+        Args:
+            category:
+                Document category.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._workbook.properties.category = category.strip()
+
+        self._logger.debug(
+            "%s Workbook category updated.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def set_keywords(
+        self,
+        keywords: str,
+    ) -> None:
+        """Set workbook keywords.
+
+        Args:
+            keywords:
+                Comma-separated keyword list.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._workbook.properties.keywords = keywords.strip()
+
+        self._logger.debug(
+            "%s Workbook keywords updated.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def set_comments(
+        self,
+        comments: str,
+    ) -> None:
+        """Set workbook comments/description.
+
+        Args:
+            comments:
+                Document description.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._workbook.properties.description = comments.strip()
+
+        self._logger.debug(
+            "%s Workbook comments updated.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def set_creation_date(
+        self,
+        created: datetime | None = None,
+    ) -> None:
+        """Set the workbook creation timestamp.
+
+        Args:
+            created:
+                Creation timestamp. When omitted, the current UTC time is used.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        timestamp = created or datetime.now(UTC)
+
+        self._workbook.properties.created = timestamp
+
+        self._logger.debug(
+            "%s Workbook creation date set to %s.",
+            _LOG_MESSAGE_PREFIX,
+            timestamp.isoformat(),
+        )
+
+    def set_modification_date(
+        self,
+        modified: datetime | None = None,
+    ) -> None:
+        """Set the workbook modification timestamp.
+
+        Args:
+            modified:
+                Modification timestamp. When omitted, the current UTC time is
+                used.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        timestamp = modified or datetime.now(UTC)
+
+        self._workbook.properties.modified = timestamp
+
+        self._logger.debug(
+            "%s Workbook modification date set to %s.",
+            _LOG_MESSAGE_PREFIX,
+            timestamp.isoformat(),
+        )
+
+
+###############################################################################
+# WorkbookBuilder - Validation integration
+###############################################################################
+
+    def apply_standard_validations(self) -> None:
+        """Apply the project's standard workbook validations.
+
+        This method serves as the central integration point between
+        ``WorkbookBuilder`` and ``validation.py``. Validation creation is
+        delegated entirely to the validation module to avoid duplicating
+        validation logic inside this orchestration layer.
+
+        The implementation attempts to call one of the following public entry
+        points if present in ``validation.py``:
+
+        * ``apply_standard_validations(workbook)``
+        * ``apply_standard_validations(builder)``
+        * ``register_standard_validations(workbook)``
+        * ``register_standard_validations(builder)``
+
+        Missing entry points are treated as a no-op to preserve compatibility
+        with evolving versions of ``validation.py``.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._logger.debug(
+            "%s Applying standard workbook validations.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+        self._invoke_validation_hook(
+            "apply_standard_validations",
+            self._workbook,
+            self,
+        ) or self._invoke_validation_hook(
+            "register_standard_validations",
+            self._workbook,
+            self,
+        )
+
+        self._logger.info(
+            "%s Standard validation phase completed.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def apply_sheet_validations(
+        self,
+        worksheet: WorksheetType,
+    ) -> None:
+        """Apply validations to a single worksheet.
+
+        Validation creation remains the responsibility of ``validation.py``.
+        This method simply delegates to the first compatible interface exposed
+        by that module.
+
+        Supported public interfaces include:
+
+        * ``apply_sheet_validations(worksheet)``
+        * ``apply_sheet_validations(builder, worksheet)``
+        * ``apply_sheet_validations(workbook, worksheet)``
+
+        Args:
+            worksheet:
+                Worksheet receiving validations.
+        """
+        self._logger.debug(
+            "%s Applying validations to worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+        self._invoke_validation_hook(
+            "apply_sheet_validations",
+            worksheet,
+            self,
+            self._workbook,
+        )
+
+    def register_validation_ranges(self) -> None:
+        """Register workbook validation ranges.
+
+        Workbook-level validation ranges (typically implemented as named ranges
+        or hidden lookup regions) are delegated to ``validation.py``.
+
+        Supported public interfaces include:
+
+        * ``register_validation_ranges(workbook)``
+        * ``register_validation_ranges(builder)``
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._logger.debug(
+            "%s Registering validation ranges.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+        self._invoke_validation_hook(
+            "register_validation_ranges",
+            self._workbook,
+            self,
+        )
+
+    def _invoke_validation_hook(
+        self,
+        function_name: str,
+        *preferred_arguments: object,
+    ) -> bool:
+        """Invoke a reusable validation hook.
+
+        The helper searches ``validation.py`` for the requested function and
+        attempts several common calling conventions. This allows
+        ``WorkbookBuilder`` to remain compatible with future revisions of the
+        validation subsystem without embedding validation-specific knowledge.
+
+        Args:
+            function_name:
+                Name of the public function to invoke.
+
+            *preferred_arguments:
+                Candidate arguments supplied to the hook.
+
+        Returns:
+            ``True`` if a compatible validation function was successfully
+            invoked; otherwise ``False``.
+        """
+        hook = getattr(validation, function_name, None)
+
+        if not callable(hook):
+            self._logger.debug(
+                "%s Validation hook '%s' is unavailable.",
+                _LOG_MESSAGE_PREFIX,
+                function_name,
+            )
+            return False
+
+        candidate_calls: tuple[tuple[object, ...], ...] = (
+            preferred_arguments,
+            (self,),
+            (self._workbook,),
+            (),
+        )
+
+        for args in candidate_calls:
+            try:
+                hook(*args)
+                self._logger.debug(
+                    "%s Executed validation hook '%s'.",
+                    _LOG_MESSAGE_PREFIX,
+                    function_name,
+                )
+                return True
+            except TypeError:
+                continue
+
+        self._logger.warning(
+            "%s Validation hook '%s' exists but no compatible signature "
+            "was found.",
+            _LOG_MESSAGE_PREFIX,
+            function_name,
+        )
+
+        return False
+
+    def _apply_validation_to_range(
+        self,
+        worksheet: WorksheetType,
+        validation_object: object,
+        cell_range: str,
+    ) -> None:
+        """Attach an existing validation object to a worksheet range.
+
+        This helper performs no validation construction. It simply associates an
+        already-created validation object with a worksheet and cell range.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            validation_object:
+                Existing validation object created by ``validation.py``.
+
+            cell_range:
+                Excel range receiving the validation.
+
+        Raises:
+            AttributeError:
+                If the supplied validation object does not provide the expected
+                ``add()`` interface.
+        """
+        validation_object.add(cell_range)
+        worksheet.add_data_validation(validation_object)
+
+        self._logger.debug(
+            "%s Applied validation to '%s' on worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            cell_range,
+            worksheet.title,
+        )
+
+    def _register_validation_object(
+        self,
+        key: str,
+        validation_object: object,
+    ) -> None:
+        """Register a reusable validation object.
+
+        Validation objects are stored inside the helper registry so that
+        worksheet builders can reuse them instead of recreating identical
+        validations multiple times.
+
+        Args:
+            key:
+                Logical validation identifier.
+
+            validation_object:
+                Validation instance produced by ``validation.py``.
+        """
+        registry = self._helper_registry.setdefault(
+            "validation_objects",
+            {},
+        )
+
+        if isinstance(registry, dict):
+            registry[key] = validation_object
+
+        self._logger.debug(
+            "%s Registered validation helper '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            key,
+        )
+
+
+
+###############################################################################
+# WorkbookBuilder - Formula integration
+###############################################################################
+
+    def register_formulas(self) -> None:
+        """Register reusable formula providers.
+
+        This method initializes the formula subsystem used throughout the
+        workbook. Formula generation remains the responsibility of
+        ``formulas.py``; this builder merely discovers and registers available
+        helpers.
+
+        Supported integration points include (if present):
+
+        * ``register_formulas(builder)``
+        * ``register_formulas(workbook)``
+        * ``get_formula_registry()``
+
+        Registered formula providers are cached in the builder's helper
+        registry for efficient reuse.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        self._logger.debug(
+            "%s Registering formula providers.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+        self._formula_cache.clear()
+
+        hook = getattr(formulas, "register_formulas", None)
+
+        if callable(hook):
+            try:
+                hook(self)
+            except TypeError:
+                hook(self._workbook)
+
+        registry_factory = getattr(
+            formulas,
+            "get_formula_registry",
+            None,
+        )
+
+        if callable(registry_factory):
+            registry = registry_factory()
+
+            if isinstance(registry, dict):
+                self._formula_cache.update(registry)
+
+        self._logger.info(
+            "%s Formula registration completed.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def insert_formula(
+        self,
+        cell: CellType,
+        formula: str,
+    ) -> None:
+        """Insert an Excel formula into a cell.
+
+        Args:
+            cell:
+                Destination cell.
+
+            formula:
+                Excel formula.
+
+        Raises:
+            ValueError:
+                If *formula* is empty.
+        """
+        formula = formula.strip()
+
+        if not formula:
+            raise ValueError("Formula cannot be empty.")
+
+        if not formula.startswith("="):
+            formula = f"={formula}"
+
+        cell.value = formula
+
+        self._logger.debug(
+            "%s Inserted formula into %s.",
+            _LOG_MESSAGE_PREFIX,
+            cell.coordinate,
+        )
+
+    def insert_registered_formula(
+        self,
+        worksheet: WorksheetType,
+        cell_reference: str,
+        formula_name: str,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        """Insert a dynamically generated formula.
+
+        The formula is obtained from the registered formula cache or, if
+        necessary, lazily resolved from ``formulas.py``.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            cell_reference:
+                Destination cell reference.
+
+            formula_name:
+                Logical formula identifier.
+
+            *args:
+                Positional arguments forwarded to the formula provider.
+
+            **kwargs:
+                Keyword arguments forwarded to the formula provider.
+
+        Raises:
+            KeyError:
+                If the requested formula provider cannot be located.
+        """
+        provider = self.get_formula_provider(formula_name)
+
+        if callable(provider):
+            expression = provider(*args, **kwargs)
+        else:
+            expression = provider
+
+        self.insert_formula(
+            worksheet[cell_reference],
+            str(expression),
+        )
+
+    def get_formula_provider(
+        self,
+        formula_name: str,
+    ) -> object:
+        """Return a registered formula provider.
+
+        Formula providers are cached after first discovery to avoid repeated
+        module lookups.
+
+        Args:
+            formula_name:
+                Logical provider name.
+
+        Returns:
+            The registered provider.
+
+        Raises:
+            KeyError:
+                If the provider cannot be found.
+        """
+        if formula_name in self._formula_cache:
+            return self._formula_cache[formula_name]
+
+        provider = getattr(formulas, formula_name, None)
+
+        if provider is None:
+            raise KeyError(
+                f"Unknown formula provider: {formula_name}"
+            )
+
+        self._formula_cache[formula_name] = provider
+
+        return provider
+
+    def cache_formula(
+        self,
+        name: str,
+        provider: object,
+    ) -> None:
+        """Register a reusable formula provider.
+
+        Args:
+            name:
+                Logical formula name.
+
+            provider:
+                Formula callable or constant expression.
+        """
+        self._formula_cache[name] = provider
+
+        self._logger.debug(
+            "%s Cached formula provider '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            name,
+        )
+
+    def clear_formula_cache(self) -> None:
+        """Clear all cached formula providers."""
+        self._formula_cache.clear()
+
+        self._logger.debug(
+            "%s Formula cache cleared.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def list_registered_formulas(self) -> tuple[str, ...]:
+        """Return the names of all cached formula providers.
+
+        Returns:
+            Alphabetically sorted tuple of registered provider names.
+        """
+        return tuple(sorted(self._formula_cache))
+
+    def _initialize_formula_helpers(self) -> None:
+        """Initialize internal formula infrastructure.
+
+        This helper prepares the cache used for dynamic formula discovery.
+        Calling this method multiple times is safe.
+        """
+        if not hasattr(self, "_formula_cache"):
+            self._formula_cache: dict[str, object] = {}
+
+        self._helper_registry["formula_cache"] = self._formula_cache
+
+        self._logger.debug(
+            "%s Formula helper infrastructure initialized.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+
+###############################################################################
+# WorkbookBuilder - Hyperlink helpers
+###############################################################################
+
+from openpyxl.styles import Font
+from openpyxl.worksheet.hyperlink import Hyperlink
+
+
+    def add_internal_hyperlink(
+        self,
+        worksheet: WorksheetType,
+        cell_reference: str,
+        target: str,
+        *,
+        display: str | None = None,
+        tooltip: str | None = None,
+    ) -> CellType:
+        """Create an internal workbook hyperlink.
+
+        Internal hyperlinks navigate to another worksheet or cell within the
+        same workbook.
+
+        Args:
+            worksheet:
+                Worksheet containing the hyperlink.
+
+            cell_reference:
+                Cell that will contain the hyperlink.
+
+            target:
+                Excel internal reference such as::
+
+                    Summary!A1
+                    'Match 01'!B5
+
+            display:
+                Optional displayed text.
+
+            tooltip:
+                Optional Excel tooltip.
+
+        Returns:
+            The modified cell.
+        """
+        cell = worksheet[cell_reference]
+
+        if display is not None:
+            cell.value = display
+
+        cell.hyperlink = Hyperlink(
+            ref=cell.coordinate,
+            location=target,
+            tooltip=tooltip,
+            display=display,
+        )
+
+        try:
+            self.style_cell(cell, "Hyperlink")
+        except Exception:
+            cell.font = Font(
+                color="0563C1",
+                underline="single",
+            )
+
+        self._logger.debug(
+            "%s Added internal hyperlink '%s' -> '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            cell.coordinate,
+            target,
+        )
+
+        return cell
+
+    def add_external_hyperlink(
+        self,
+        worksheet: WorksheetType,
+        cell_reference: str,
+        url: str,
+        *,
+        display: str | None = None,
+        tooltip: str | None = None,
+    ) -> CellType:
+        """Create an external hyperlink.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            cell_reference:
+                Destination cell.
+
+            url:
+                External URL.
+
+            display:
+                Optional displayed text.
+
+            tooltip:
+                Optional tooltip.
+
+        Returns:
+            The modified cell.
+        """
+        cell = worksheet[cell_reference]
+
+        if display is not None:
+            cell.value = display
+
+        cell.hyperlink = Hyperlink(
+            ref=cell.coordinate,
+            target=url,
+            tooltip=tooltip,
+            display=display,
+        )
+
+        try:
+            self.style_cell(cell, "Hyperlink")
+        except Exception:
+            cell.font = Font(
+                color="0563C1",
+                underline="single",
+            )
+
+        self._logger.debug(
+            "%s Added external hyperlink '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            url,
+        )
+
+        return cell
+
+    def add_sheet_link(
+        self,
+        worksheet: WorksheetType,
+        cell_reference: str,
+        target_sheet: str,
+        *,
+        target_cell: str = "A1",
+        display: str | None = None,
+    ) -> CellType:
+        """Create a hyperlink to another worksheet.
+
+        Args:
+            worksheet:
+                Source worksheet.
+
+            cell_reference:
+                Cell containing the hyperlink.
+
+            target_sheet:
+                Destination worksheet title.
+
+            target_cell:
+                Destination cell.
+
+            display:
+                Optional displayed text.
+
+        Returns:
+            The modified cell.
+
+        Raises:
+            KeyError:
+                If the destination worksheet is not registered.
+        """
+        self.get_sheet(target_sheet)
+
+        destination = f"'{target_sheet}'!{target_cell}"
+
+        return self.add_internal_hyperlink(
+            worksheet=worksheet,
+            cell_reference=cell_reference,
+            target=destination,
+            display=display or target_sheet,
+        )
+
+    def create_table_of_contents_links(
+        self,
+        worksheet: WorksheetType,
+        *,
+        start_row: int = 2,
+        column: int | str = 1,
+        include_hidden: bool = False,
+    ) -> None:
+        """Populate a worksheet with links to registered worksheets.
+
+        Each worksheet is written to one row beginning at *start_row*.
+
+        Args:
+            worksheet:
+                Worksheet acting as the table of contents.
+
+            start_row:
+                First output row.
+
+            column:
+                Output column.
+
+            include_hidden:
+                Include hidden worksheets.
+        """
+        column_letter = self.validate_column_reference(column)
+
+        row = start_row
+
+        for sheet_name, sheet in self._worksheet_registry.items():
+            if (
+                not include_hidden
+                and sheet.sheet_state != "visible"
+            ):
+                continue
+
+            self.add_sheet_link(
+                worksheet=worksheet,
+                cell_reference=f"{column_letter}{row}",
+                target_sheet=sheet_name,
+                display=sheet_name,
+            )
+
+            row += 1
+
+        self._logger.info(
+            "%s Created table of contents links.",
+            _LOG_MESSAGE_PREFIX,
+        )
+
+    def add_navigation_button(
+        self,
+        worksheet: WorksheetType,
+        cell_reference: str,
+        *,
+        target_sheet: str,
+        label: str,
+        target_cell: str = "A1",
+    ) -> CellType:
+        """Create a simple worksheet navigation button.
+
+        The implementation intentionally uses a styled hyperlink instead of
+        Excel drawing objects to maximize compatibility with openpyxl and
+        spreadsheet applications.
+
+        Args:
+            worksheet:
+                Source worksheet.
+
+            cell_reference:
+                Cell representing the navigation button.
+
+            target_sheet:
+                Destination worksheet.
+
+            label:
+                Button caption.
+
+            target_cell:
+                Destination cell.
+
+        Returns:
+            The modified cell.
+        """
+        cell = self.add_sheet_link(
+            worksheet=worksheet,
+            cell_reference=cell_reference,
+            target_sheet=target_sheet,
+            target_cell=target_cell,
+            display=label,
+        )
+
+        try:
+            self.style_cell(cell, "Navigation")
+        except Exception:
+            cell.font = Font(
+                bold=True,
+                color="FFFFFF",
+            )
+
+        self._logger.debug(
+            "%s Added navigation button '%s' -> '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            label,
+            target_sheet,
+        )
+
+        return cell
+
+
+
+###############################################################################
+# WorkbookBuilder - Workbook navigation helpers
+###############################################################################
+
+    def create_main_menu_sheet(
+        self,
+        *,
+        title: str = "Main Menu",
+        overwrite: bool = False,
+    ) -> WorksheetType:
+        """Create the workbook's main navigation worksheet.
+
+        The main menu serves as the central entry point into the workbook and
+        typically contains hyperlinks to every user-facing worksheet.
+
+        Args:
+            title:
+                Title of the navigation worksheet.
+
+            overwrite:
+                If ``True`` and the worksheet already exists, the existing
+                worksheet is deleted before creating a new one.
+
+        Returns:
+            The created or existing worksheet.
+
+        Raises:
+            RuntimeError:
+                If the workbook has not been created.
+        """
+        if self._workbook is None:
+            raise RuntimeError("Workbook has not been created.")
+
+        if self.sheet_exists(title):
+            if overwrite:
+                self.delete_sheet(title)
+            else:
+                return self.get_sheet(title)
+
+        worksheet = self.create_sheet(title, index=0)
+
+        worksheet["A1"] = self._config.workbook_title
+        worksheet["A2"] = "Workbook Navigation"
+
+        try:
+            self.style_cell(worksheet["A1"], "Title")
+            self.style_cell(worksheet["A2"], "Header")
+        except Exception:
+            pass
+
+        self._logger.info(
+            "%s Created main menu worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            title,
+        )
+
+        return worksheet
+
+    def build_navigation_table(
+        self,
+        worksheet: WorksheetType,
+        *,
+        start_row: int = 4,
+        title: str = "Available Worksheets",
+        include_hidden: bool = False,
+    ) -> None:
+        """Build a navigation table containing worksheet hyperlinks.
+
+        Args:
+            worksheet:
+                Worksheet that will contain the navigation table.
+
+            start_row:
+                First row used by the table.
+
+            title:
+                Section title.
+
+            include_hidden:
+                Whether hidden worksheets should be listed.
+        """
+        worksheet.cell(row=start_row, column=1).value = title
+
+        try:
+            self.style_cell(
+                worksheet.cell(row=start_row, column=1),
+                "Header",
+            )
+        except Exception:
+            pass
+
+        current_row = start_row + 1
+
+        for name, sheet in self._worksheet_registry.items():
+            if (
+                not include_hidden
+                and sheet.sheet_state != "visible"
+            ):
+                continue
+
+            if sheet is worksheet:
+                continue
+
+            self.add_sheet_link(
+                worksheet=worksheet,
+                cell_reference=f"A{current_row}",
+                target_sheet=name,
+                display=name,
+            )
+
+            current_row += 1
+
+        self._logger.debug(
+            "%s Built navigation table on worksheet '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            worksheet.title,
+        )
+
+    def add_back_link(
+        self,
+        worksheet: WorksheetType,
+        *,
+        target_sheet: str,
+        target_cell: str = "A1",
+        cell_reference: str = "A1",
+        label: str = "← Back",
+    ) -> CellType:
+        """Insert a reusable back-navigation hyperlink.
+
+        Args:
+            worksheet:
+                Worksheet receiving the hyperlink.
+
+            target_sheet:
+                Destination worksheet.
+
+            target_cell:
+                Destination cell.
+
+            cell_reference:
+                Cell containing the hyperlink.
+
+            label:
+                Display text.
+
+        Returns:
+            The modified cell.
+        """
+        return self.add_navigation_button(
+            worksheet=worksheet,
+            cell_reference=cell_reference,
+            target_sheet=target_sheet,
+            target_cell=target_cell,
+            label=label,
+        )
+
+    def add_home_link(
+        self,
+        worksheet: WorksheetType,
+        *,
+        home_sheet: str = "Main Menu",
+        cell_reference: str = "B1",
+        label: str = "🏠 Home",
+    ) -> CellType:
+        """Insert a hyperlink returning to the workbook home page.
+
+        Args:
+            worksheet:
+                Worksheet receiving the hyperlink.
+
+            home_sheet:
+                Name of the home worksheet.
+
+            cell_reference:
+                Cell containing the hyperlink.
+
+            label:
+                Display text.
+
+        Returns:
+            The modified cell.
+        """
+        return self.add_navigation_button(
+            worksheet=worksheet,
+            cell_reference=cell_reference,
+            target_sheet=home_sheet,
+            label=label,
+        )
+
+    def create_sheet_index(
+        self,
+        *,
+        sheet_name: str = "Sheet Index",
+        include_hidden: bool = False,
+    ) -> WorksheetType:
+        """Create an alphabetical worksheet index.
+
+        Unlike the main menu, the sheet index is intended to provide a compact
+        directory of workbook worksheets.
+
+        Args:
+            sheet_name:
+                Worksheet title.
+
+            include_hidden:
+                Include hidden worksheets.
+
+        Returns:
+            The worksheet containing the index.
+        """
+        if self.sheet_exists(sheet_name):
+            worksheet = self.get_sheet(sheet_name)
+        else:
+            worksheet = self.create_sheet(sheet_name)
+
+        worksheet["A1"] = "Worksheet Index"
+
+        try:
+            self.style_cell(worksheet["A1"], "Title")
+        except Exception:
+            pass
+
+        row = 3
+
+        for name in sorted(self._worksheet_registry):
+            sheet = self._worksheet_registry[name]
+
+            if (
+                not include_hidden
+                and sheet.sheet_state != "visible"
+            ):
+                continue
+
+            if name == sheet_name:
+                continue
+
+            self.add_sheet_link(
+                worksheet=worksheet,
+                cell_reference=f"A{row}",
+                target_sheet=name,
+                display=name,
+            )
+
+            row += 1
+
+        self._logger.info(
+            "%s Created worksheet index '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            sheet_name,
+        )
+
+        return worksheet
+
+
+###############################################################################
+# WorkbookBuilder - General helper utilities
+###############################################################################
+
+from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
+from time import perf_counter
+
+from openpyxl.cell.cell import MergedCell
+from openpyxl.utils import (
+    column_index_from_string,
+    coordinate_from_string,
+    get_column_letter,
+    range_boundaries,
+)
+from openpyxl.utils.cell import rows_from_range
+
+
+    def write_cell(
+        self,
+        worksheet: WorksheetType,
+        coordinate: str,
+        value: object,
+        *,
+        style: str | None = None,
+    ) -> CellType:
+        """Safely write a value to a worksheet cell.
+
+        This helper validates that the destination is not a merged-cell
+        placeholder before assigning the value. Optionally, a named style may
+        be applied after writing.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            coordinate:
+                Excel cell coordinate.
+
+            value:
+                Value to write.
+
+            style:
+                Optional named style.
+
+        Returns:
+            The modified cell.
+
+        Raises:
+            ValueError:
+                If the destination cell is a merged-cell placeholder.
+        """
+        cell = worksheet[coordinate]
+
+        if isinstance(cell, MergedCell):
+            raise ValueError(
+                f"Cannot write directly to merged cell '{coordinate}'."
+            )
+
+        cell.value = value
+
+        if style is not None:
+            self.style_cell(cell, style)
+
+        return cell
+
+    def merge_cells(
+        self,
+        worksheet: WorksheetType,
+        cell_range: str,
+        *,
+        value: object | None = None,
+        style: str | None = None,
+    ) -> CellType:
+        """Merge a range of cells.
+
+        Optionally assigns a value and style to the upper-left cell.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            cell_range:
+                Excel range to merge.
+
+            value:
+                Optional value for the anchor cell.
+
+            style:
+                Optional named style.
+
+        Returns:
+            The upper-left cell of the merged range.
+        """
+        worksheet.merge_cells(cell_range)
+
+        first_coordinate = cell_range.split(":")[0]
+        cell = worksheet[first_coordinate]
+
+        if value is not None:
+            cell.value = value
+
+        if style is not None:
+            self.style_cell(cell, style)
+
+        self._logger.debug(
+            "%s Merged range '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            cell_range,
+        )
+
+        return cell
+
+    def unmerge_cells(
+        self,
+        worksheet: WorksheetType,
+        cell_range: str,
+    ) -> None:
+        """Unmerge a merged cell range.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            cell_range:
+                Excel merged range.
+        """
+        worksheet.unmerge_cells(cell_range)
+
+        self._logger.debug(
+            "%s Unmerged range '%s'.",
+            _LOG_MESSAGE_PREFIX,
+            cell_range,
+        )
+
+    def parse_range(
+        self,
+        cell_range: str,
+    ) -> tuple[int, int, int, int]:
+        """Parse an Excel range into numeric boundaries.
+
+        Args:
+            cell_range:
+                Excel range.
+
+        Returns:
+            Tuple containing::
+
+                (
+                    min_column,
+                    min_row,
+                    max_column,
+                    max_row,
+                )
+        """
+        return range_boundaries(cell_range)
+
+    def iter_range_coordinates(
+        self,
+        cell_range: str,
+    ) -> Iterable[str]:
+        """Iterate over every coordinate within a cell range.
+
+        Args:
+            cell_range:
+                Excel range.
+
+        Yields:
+            Cell coordinates in row-major order.
+        """
+        for row in rows_from_range(cell_range):
+            yield from row
+
+    def split_coordinate(
+        self,
+        coordinate: str,
+    ) -> tuple[str, int]:
+        """Split a coordinate into column letter and row number.
+
+        Args:
+            coordinate:
+                Excel coordinate.
+
+        Returns:
+            Tuple of column letter and row number.
+        """
+        return coordinate_from_string(coordinate)
+
+    def make_coordinate(
+        self,
+        column: int | str,
+        row: int,
+    ) -> str:
+        """Construct an Excel coordinate.
+
+        Args:
+            column:
+                Column index or letter.
+
+            row:
+                Row number.
+
+        Returns:
+            Excel coordinate.
+        """
+        column_letter = (
+            get_column_letter(column)
+            if isinstance(column, int)
+            else self.validate_column_reference(column)
+        )
+
+        return f"{column_letter}{row}"
+
+    def column_to_index(
+        self,
+        column: str,
+    ) -> int:
+        """Convert an Excel column letter to a numeric index.
+
+        Args:
+            column:
+                Excel column letter.
+
+        Returns:
+            One-based column index.
+        """
+        return column_index_from_string(column.upper())
+
+    def worksheet_dimensions(
+        self,
+        worksheet: WorksheetType,
+    ) -> tuple[int, int]:
+        """Return worksheet dimensions.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+        Returns:
+            Tuple containing::
+
+                (
+                    maximum_row,
+                    maximum_column,
+                )
+        """
+        return (
+            worksheet.max_row,
+            worksheet.max_column,
+        )
+
+    def used_range(
+        self,
+        worksheet: WorksheetType,
+    ) -> str:
+        """Return the worksheet's current used range.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+        Returns:
+            Excel range string.
+        """
+        return worksheet.calculate_dimension()
+
+    def log_method_call(
+        self,
+        method_name: str,
+        **context: object,
+    ) -> None:
+        """Emit a standardized debug log entry.
+
+        Args:
+            method_name:
+                Method being logged.
+
+            **context:
+                Additional contextual information.
+        """
+        if context:
+            details = ", ".join(
+                f"{key}={value!r}"
+                for key, value in sorted(context.items())
+            )
+            message = f"{method_name}({details})"
+        else:
+            message = method_name
+
+        self._logger.debug(
+            "%s %s",
+            _LOG_MESSAGE_PREFIX,
+            message,
+        )
+
+    @contextmanager
+    def performance_timer(
+        self,
+        operation: str,
+    ) -> Iterable[None]:
+        """Measure the execution time of an operation.
+
+        Example:
+            >>> with builder.performance_timer("Populate Teams"):
+            ...     ...
+
+        Args:
+            operation:
+                Human-readable operation name.
+        """
+        start = perf_counter()
+
+        try:
+            yield
+        finally:
+            elapsed = perf_counter() - start
+
+            self._logger.info(
+                "%s %s completed in %.6f seconds.",
+                _LOG_MESSAGE_PREFIX,
+                operation,
+                elapsed,
+            )
+
+    def batch_write(
+        self,
+        worksheet: WorksheetType,
+        values: Sequence[tuple[str, object]],
+        *,
+        style: str | None = None,
+    ) -> None:
+        """Efficiently write multiple values.
+
+        Args:
+            worksheet:
+                Target worksheet.
+
+            values:
+                Sequence of ``(coordinate, value)`` pairs.
+
+            style:
+                Optional style applied to every written cell.
+        """
+        for coordinate, value in values:
+            self.write_cell(
+                worksheet,
+                coordinate,
+                value,
+                style=style,
+            )
+
+        self._logger.debug(
+            "%s Batch wrote %d cells.",
+            _LOG_MESSAGE_PREFIX,
+            len(values),
+        )
