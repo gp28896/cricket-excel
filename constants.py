@@ -2036,3 +2036,978 @@ DEFAULT_CELL_HIDDEN: Final[bool] = False
 PROTECTED_CELL_LOCKED: Final[bool] = True
 
 FORMULA_CELL_HIDDEN: Final[bool] = True
+
+# ============================================================================
+# Excel Named Range Constants
+# ============================================================================
+#
+# This section defines the canonical names of workbook-level Named Ranges.
+#
+# Named ranges provide a stable mechanism for referring to cells, tables and
+# validation lists without relying on absolute worksheet references.
+#
+# Advantages
+# ----------
+#
+# • Easier worksheet refactoring.
+# • Cleaner formulas.
+# • Centralised naming convention.
+# • Improved readability.
+# • Simplified data validation.
+# • Reduced hard-coded worksheet references.
+#
+# Naming Convention
+# -----------------
+#
+# All names:
+#
+# • Begin with a letter.
+# • Contain only letters, numbers and underscores.
+# • Contain no spaces.
+# • Avoid Excel reserved names.
+# • Remain stable even if worksheet names change.
+#
+# workbook.py should create these named ranges once during workbook
+# construction. validation.py and formulas.py should reference these constants
+# rather than embedding literal names.
+# ============================================================================
+
+# ============================================================================
+# Master Data Named Ranges
+# ============================================================================
+#
+# Dynamic lists used throughout the workbook.
+# ============================================================================
+
+NR_TEAMS: Final[str] = "Teams"
+
+NR_PLAYERS: Final[str] = "Players"
+
+NR_VENUES: Final[str] = "Venues"
+
+NR_OFFICIALS: Final[str] = "Officials"
+
+NR_TOURNAMENT_FORMATS: Final[str] = "TournamentFormats"
+
+# ============================================================================
+# Cricket Lookup Lists
+# ============================================================================
+#
+# Named ranges used by validation.py to populate cricket-specific dropdowns.
+# ============================================================================
+
+NR_BATTING_STYLES: Final[str] = "BattingStyles"
+
+NR_BOWLING_STYLES: Final[str] = "BowlingStyles"
+
+NR_PLAYER_ROLES: Final[str] = "PlayerRoles"
+
+NR_DISMISSALS: Final[str] = "Dismissals"
+
+NR_EXTRAS: Final[str] = "Extras"
+
+NR_POWERPLAYS: Final[str] = "Powerplays"
+
+# ============================================================================
+# Validation Lists
+# ============================================================================
+#
+# Frequently reused validation sources.
+# ============================================================================
+
+NR_YES_NO: Final[str] = "YesNo"
+
+NR_TRUE_FALSE: Final[str] = "TrueFalse"
+
+NR_ENABLED_DISABLED: Final[str] = "EnabledDisabled"
+
+NR_GENDERS: Final[str] = "Genders"
+
+NR_COUNTRIES: Final[str] = "Countries"
+
+NR_STATES: Final[str] = "States"
+
+NR_AGE_GROUPS: Final[str] = "AgeGroups"
+
+NR_COMPETITION_FORMATS: Final[str] = "CompetitionFormats"
+
+NR_BALL_COLOURS: Final[str] = "BallColours"
+
+NR_PITCH_TYPES: Final[str] = "PitchTypes"
+
+NR_WEATHER: Final[str] = "Weather"
+
+NR_GROUND_CONDITIONS: Final[str] = "GroundConditions"
+
+NR_RESULT_METHODS: Final[str] = "ResultMethods"
+
+NR_UMPIRE_ROLES: Final[str] = "UmpireRoles"
+
+# ============================================================================
+# Match Configuration Lists
+# ============================================================================
+#
+# Validation ranges related to match administration.
+# ============================================================================
+
+NR_TOSS_CHOICES: Final[str] = "TossChoices"
+
+NR_TOSS_DECISIONS: Final[str] = "TossDecisions"
+
+NR_MATCH_STATUS: Final[str] = "MatchStatus"
+
+NR_MATCH_RESULTS: Final[str] = "MatchResults"
+
+NR_POWERPLAY_NAMES: Final[str] = "PowerplayNames"
+
+NR_FIELD_RESTRICTIONS: Final[str] = "FieldRestrictions"
+
+# ============================================================================
+# Ball Outcome Lists
+# ============================================================================
+#
+# Validation ranges used while recording deliveries.
+# ============================================================================
+
+NR_RUN_VALUES: Final[str] = "RunValues"
+
+NR_BOUNDARY_TYPES: Final[str] = "BoundaryTypes"
+
+NR_EXTRA_TYPES: Final[str] = "ExtraTypes"
+
+NR_NO_BALL_REASONS: Final[str] = "NoBallReasons"
+
+NR_WIDE_REASONS: Final[str] = "WideReasons"
+
+NR_PENALTY_REASONS: Final[str] = "PenaltyReasons"
+
+# ============================================================================
+# Convenience Collection
+# ============================================================================
+#
+# Complete list of named ranges expected to exist in the workbook.
+#
+# workbook.py may iterate over this tuple when validating workbook integrity,
+# creating named ranges, or performing diagnostics.
+# ============================================================================
+
+ALL_NAMED_RANGES: Final[tuple[str, ...]] = (
+    NR_TEAMS,
+    NR_PLAYERS,
+    NR_VENUES,
+    NR_OFFICIALS,
+    NR_TOURNAMENT_FORMATS,
+    NR_BATTING_STYLES,
+    NR_BOWLING_STYLES,
+    NR_PLAYER_ROLES,
+    NR_DISMISSALS,
+    NR_EXTRAS,
+    NR_POWERPLAYS,
+    NR_YES_NO,
+    NR_TRUE_FALSE,
+    NR_ENABLED_DISABLED,
+    NR_GENDERS,
+    NR_COUNTRIES,
+    NR_STATES,
+    NR_AGE_GROUPS,
+    NR_COMPETITION_FORMATS,
+    NR_BALL_COLOURS,
+    NR_PITCH_TYPES,
+    NR_WEATHER,
+    NR_GROUND_CONDITIONS,
+    NR_RESULT_METHODS,
+    NR_UMPIRE_ROLES,
+    NR_TOSS_CHOICES,
+    NR_TOSS_DECISIONS,
+    NR_MATCH_STATUS,
+    NR_MATCH_RESULTS,
+    NR_POWERPLAY_NAMES,
+    NR_FIELD_RESTRICTIONS,
+    NR_RUN_VALUES,
+    NR_BOUNDARY_TYPES,
+    NR_EXTRA_TYPES,
+    NR_NO_BALL_REASONS,
+    NR_WIDE_REASONS,
+    NR_PENALTY_REASONS,
+)
+
+# ============================================================================
+# Formula Engine Constants
+# ============================================================================
+#
+# This section contains constants used exclusively by formulas.py.
+#
+# The formulas module performs mathematical calculations for cricket scoring
+# and statistics. Centralising these values ensures that every calculation
+# throughout the application follows identical assumptions and rounding rules.
+#
+# Design Principles
+# -----------------
+#
+# • Deterministic calculations.
+# • No duplicated numeric literals.
+# • Consistent rounding.
+# • Easy future customisation.
+# • Shared by workbook.py, score_ball.py and reporting modules.
+#
+# IMPORTANT
+# ---------
+#
+# Several of these values intentionally reference previously defined constants
+# (such as BALLS_PER_OVER and DEFAULT_MAX_OVERS) rather than redefining
+# identical numeric values. This preserves a true single source of truth.
+# ============================================================================
+
+# ============================================================================
+# Core Cricket Calculation Constants
+# ============================================================================
+#
+# Re-export frequently used cricket values for clarity within formulas.py.
+# These aliases make the intent of calculations more obvious while avoiding
+# duplicate numeric literals.
+# ============================================================================
+
+FORMULA_BALLS_PER_OVER: Final[int] = BALLS_PER_OVER
+
+FORMULA_MAX_OVERS: Final[int] = DEFAULT_MAX_OVERS
+
+# ============================================================================
+# Minimum Overs
+# ============================================================================
+#
+# Smallest valid innings length supported by generic calculations.
+#
+# Individual tournaments may impose larger minimums.
+# ============================================================================
+
+FORMULA_MIN_OVERS: Final[int] = 1
+
+# ============================================================================
+# Precision Settings
+# ============================================================================
+#
+# Decimal precision used when returning calculated values.
+#
+# These settings affect presentation and rounding only—they do not alter the
+# underlying mathematical calculations.
+# ============================================================================
+
+FORMULA_RUN_RATE_PRECISION: Final[int] = RUN_RATE_PRECISION
+
+FORMULA_STRIKE_RATE_PRECISION: Final[int] = STRIKE_RATE_PRECISION
+
+FORMULA_ECONOMY_PRECISION: Final[int] = ECONOMY_RATE_PRECISION
+
+FORMULA_NET_RUN_RATE_PRECISION: Final[int] = 3
+
+FORMULA_AVERAGE_PRECISION: Final[int] = AVERAGE_PRECISION
+
+# ============================================================================
+# Floating-Point Calculation Tolerances
+# ============================================================================
+#
+# Floating-point arithmetic can introduce tiny rounding differences.
+#
+# These tolerances allow formulas.py to safely compare values without relying
+# upon exact binary equality.
+#
+# SMALL
+#     Suitable for most cricket calculations.
+#
+# MEDIUM
+#     Suitable for accumulated statistics.
+#
+# LARGE
+#     Suitable for broad comparison where exact precision is unnecessary.
+# ============================================================================
+
+FLOAT_TOLERANCE_SMALL: Final[float] = 1e-9
+
+FLOAT_TOLERANCE_MEDIUM: Final[float] = 1e-6
+
+FLOAT_TOLERANCE_LARGE: Final[float] = 1e-3
+
+DEFAULT_FLOAT_TOLERANCE: Final[float] = FLOAT_TOLERANCE_SMALL
+
+# ============================================================================
+# Mathematical Defaults
+# ============================================================================
+#
+# Frequently reused numeric constants improve readability throughout the
+# formulas module and eliminate repeated literals.
+# ============================================================================
+
+ZERO_RUNS: Final[int] = 0
+
+ZERO_BALLS: Final[int] = 0
+
+ZERO_WICKETS: Final[int] = 0
+
+ONE_OVER_IN_BALLS: Final[int] = BALLS_PER_OVER
+
+# ============================================================================
+# Formula Error Values
+# ============================================================================
+#
+# Canonical return values representing common calculation outcomes.
+#
+# These symbolic constants allow formulas.py to communicate error conditions
+# consistently without embedding string literals throughout the codebase.
+#
+# The formulas module may alternatively choose to raise exceptions; these
+# constants remain useful for workbook generation, logging and diagnostics.
+# ============================================================================
+
+FORMULA_ERROR_DIVISION_BY_ZERO: Final[str] = "DIVISION_BY_ZERO"
+
+FORMULA_ERROR_INVALID_OVERS: Final[str] = "INVALID_OVERS"
+
+FORMULA_ERROR_INVALID_BALLS: Final[str] = "INVALID_BALLS"
+
+FORMULA_ERROR_INVALID_RUNS: Final[str] = "INVALID_RUNS"
+
+FORMULA_ERROR_NEGATIVE_VALUE: Final[str] = "NEGATIVE_VALUE"
+
+FORMULA_ERROR_INVALID_INPUT: Final[str] = "INVALID_INPUT"
+
+FORMULA_ERROR_INCOMPLETE_INNINGS: Final[str] = "INCOMPLETE_INNINGS"
+
+# ============================================================================
+# Formula Sentinel Values
+# ============================================================================
+#
+# Standard default values returned when a meaningful cricket statistic cannot
+# yet be calculated.
+# ============================================================================
+
+NOT_AVAILABLE_FLOAT: Final[float] = 0.0
+
+NOT_AVAILABLE_INTEGER: Final[int] = 0
+
+NOT_AVAILABLE_TEXT: Final[str] = "N/A"
+
+# ============================================================================
+# Worksheet Protection Constants
+# ============================================================================
+#
+# This section defines the default worksheet and cell protection behaviour for
+# the Cricket Tournament Workbook.
+#
+# Purpose
+# -------
+#
+# Excel worksheet protection can selectively prevent users from modifying
+# workbook content while still allowing specific interactions such as sorting,
+# filtering or selecting unlocked cells.
+#
+# By centralising these settings:
+#
+# • workbook.py can apply consistent protection across every worksheet.
+# • create_match.py can inherit sensible defaults.
+# • score_ball.py can temporarily unlock only required scoring cells.
+# • Future worksheet-specific overrides remain simple.
+#
+# IMPORTANT
+# ---------
+#
+# These are DEFAULTS.
+#
+# Individual worksheets may override these values where appropriate.
+#
+# Password management should be handled externally. This module intentionally
+# stores only a placeholder string.
+#
+# No worksheet protection logic belongs in this module.
+# ============================================================================
+
+# ============================================================================
+# Cell Lock States
+# ============================================================================
+#
+# Convenience constants for readability when applying cell protection.
+# ============================================================================
+
+CELL_LOCKED: Final[bool] = True
+
+CELL_UNLOCKED: Final[bool] = False
+
+# ============================================================================
+# Formula Visibility
+# ============================================================================
+#
+# Controls whether Excel displays formulas when worksheet protection is
+# enabled.
+#
+# Hidden formulas remain functional but are not visible in the formula bar.
+# ============================================================================
+
+FORMULAS_HIDDEN: Final[bool] = True
+
+FORMULAS_VISIBLE: Final[bool] = False
+
+# ============================================================================
+# Worksheet Password
+# ============================================================================
+#
+# Placeholder password.
+#
+# Production applications should inject passwords from configuration rather
+# than hard-coding them into source code.
+# ============================================================================
+
+DEFAULT_WORKSHEET_PASSWORD: Final[str] = ""
+
+# ============================================================================
+# Worksheet Protection Defaults
+# ============================================================================
+#
+# Master switches controlling worksheet protection behaviour.
+# ============================================================================
+
+DEFAULT_WORKSHEET_PROTECTION_ENABLED: Final[bool] = True
+
+DEFAULT_CONTENT_PROTECTION: Final[bool] = True
+
+DEFAULT_OBJECT_PROTECTION: Final[bool] = True
+
+DEFAULT_SCENARIO_PROTECTION: Final[bool] = True
+
+# ============================================================================
+# Selection Permissions
+# ============================================================================
+#
+# Determines which cells users may select after worksheet protection has been
+# enabled.
+# ============================================================================
+
+ALLOW_SELECT_LOCKED_CELLS: Final[bool] = False
+
+ALLOW_SELECT_UNLOCKED_CELLS: Final[bool] = True
+
+# ============================================================================
+# Editing Permissions
+# ============================================================================
+#
+# Controls whether users may edit various worksheet objects.
+#
+# The defaults are intentionally conservative for protecting scorecards and
+# tournament data.
+# ============================================================================
+
+ALLOW_FORMAT_CELLS: Final[bool] = False
+
+ALLOW_FORMAT_COLUMNS: Final[bool] = False
+
+ALLOW_FORMAT_ROWS: Final[bool] = False
+
+ALLOW_INSERT_COLUMNS: Final[bool] = False
+
+ALLOW_INSERT_ROWS: Final[bool] = False
+
+ALLOW_INSERT_HYPERLINKS: Final[bool] = False
+
+ALLOW_DELETE_COLUMNS: Final[bool] = False
+
+ALLOW_DELETE_ROWS: Final[bool] = False
+
+# ============================================================================
+# Data Operations
+# ============================================================================
+#
+# These options determine whether users may reorganise worksheet data without
+# changing protected content.
+# ============================================================================
+
+ALLOW_SORT: Final[bool] = True
+
+ALLOW_AUTO_FILTER: Final[bool] = True
+
+ALLOW_PIVOT_TABLES: Final[bool] = False
+
+# ============================================================================
+# Object Interaction
+# ============================================================================
+#
+# Controls interaction with graphical workbook objects.
+# ============================================================================
+
+ALLOW_EDIT_OBJECTS: Final[bool] = False
+
+ALLOW_EDIT_SCENARIOS: Final[bool] = False
+
+# ============================================================================
+# Allowed Actions
+# ============================================================================
+#
+# Human-readable names describing supported worksheet actions.
+#
+# These values are useful for logging, diagnostics, configuration screens and
+# future user interfaces.
+# ============================================================================
+
+WORKSHEET_ALLOWED_ACTIONS: Final[tuple[str, ...]] = (
+    "Select Unlocked Cells",
+    "Select Locked Cells",
+    "Format Cells",
+    "Format Columns",
+    "Format Rows",
+    "Insert Columns",
+    "Insert Rows",
+    "Insert Hyperlinks",
+    "Delete Columns",
+    "Delete Rows",
+    "Sort",
+    "AutoFilter",
+    "Pivot Tables",
+    "Edit Objects",
+    "Edit Scenarios",
+)
+
+# ============================================================================
+# Recommended Protection Profiles
+# ============================================================================
+#
+# Named protection profiles that may be referenced by workbook.py when
+# applying worksheet-specific security policies.
+#
+# These are descriptive identifiers only. The implementation logic belongs in
+# workbook.py.
+# ============================================================================
+
+PROTECTION_PROFILE_READ_ONLY: Final[str] = "ReadOnly"
+
+PROTECTION_PROFILE_DATA_ENTRY: Final[str] = "DataEntry"
+
+PROTECTION_PROFILE_SCORING: Final[str] = "Scoring"
+
+PROTECTION_PROFILE_ADMIN: Final[str] = "Administrator"
+
+PROTECTION_PROFILES: Final[tuple[str, ...]] = (
+    PROTECTION_PROFILE_READ_ONLY,
+    PROTECTION_PROFILE_DATA_ENTRY,
+    PROTECTION_PROFILE_SCORING,
+    PROTECTION_PROFILE_ADMIN,
+)
+# ============================================================================
+# Application Metadata
+# ============================================================================
+#
+# This section contains descriptive metadata about the Cricket Tournament
+# Workbook application itself.
+#
+# Unlike workbook metadata (title, subject, author, etc.), these constants
+# describe the software project that generates and manages the workbook.
+#
+# These values may be used by:
+#
+#     • workbook.py
+#     • create_match.py
+#     • logging
+#     • diagnostic reports
+#     • About dialogs
+#     • generated documentation
+#     • future REST APIs
+#
+# Keeping all metadata in one location provides a single source of truth for
+# application identification and version tracking.
+#
+# IMPORTANT
+# ---------
+#
+# Some of these values intentionally reference constants defined earlier in
+# this module (APPLICATION_NAME and __version__) to avoid duplication.
+#
+# Placeholder values should be replaced during project setup or automated
+# build processes.
+# ============================================================================
+
+# ============================================================================
+# Core Application Metadata
+# ============================================================================
+#
+# Canonical application identity.
+#
+# These aliases improve readability for modules that specifically require
+# metadata without directly referencing the earlier foundational constants.
+# ============================================================================
+
+APPLICATION_DISPLAY_NAME: Final[str] = APPLICATION_NAME
+
+APPLICATION_VERSION: Final[str] = __version__
+
+APPLICATION_IDENTIFIER: Final[str] = "cricket-tournament-workbook"
+
+APPLICATION_DESCRIPTION: Final[str] = (
+    "A comprehensive Excel-based cricket tournament management, scoring, "
+    "statistics and reporting application."
+)
+
+# ============================================================================
+# Repository Information
+# ============================================================================
+#
+# Source control metadata.
+#
+# Replace these placeholder values with the actual repository details once the
+# project is published.
+# ============================================================================
+
+PROJECT_REPOSITORY: Final[str] = "https://github.com/your-organization/your-repository"
+
+PROJECT_REPOSITORY_NAME: Final[str] = "your-repository"
+
+PROJECT_REPOSITORY_BRANCH: Final[str] = "main"
+
+# ============================================================================
+# Licensing
+# ============================================================================
+#
+# Placeholder licensing information.
+#
+# Update these values to match the project's chosen license before public
+# release.
+# ============================================================================
+
+PROJECT_LICENSE: Final[str] = "License Placeholder"
+
+LICENSE_URL: Final[str] = "https://example.com/license"
+
+# ============================================================================
+# Support Information
+# ============================================================================
+#
+# Contact information presented to users in generated workbooks, logs or
+# diagnostic reports.
+#
+# Replace these placeholders with real support channels when deploying the
+# application.
+# ============================================================================
+
+SUPPORT_EMAIL: Final[str] = "support@example.com"
+
+SUPPORT_WEBSITE: Final[str] = "https://example.com"
+
+ISSUE_TRACKER_URL: Final[str] = "https://example.com/issues"
+
+# ============================================================================
+# Copyright
+# ============================================================================
+#
+# Copyright information embedded into generated workbook metadata and future
+# application documentation.
+# ============================================================================
+
+COPYRIGHT_NOTICE: Final[str] = (
+    "Copyright (c) YYYY Your Organization. All rights reserved."
+)
+
+COPYRIGHT_OWNER: Final[str] = "Your Organization"
+
+# ============================================================================
+# Build Information
+# ============================================================================
+#
+# Build metadata.
+#
+# Continuous Integration (CI) or release pipelines may replace these values
+# automatically during packaging.
+# ============================================================================
+
+BUILD_NUMBER: Final[str] = "dev"
+
+BUILD_DATE: Final[str] = "YYYY-MM-DD"
+
+BUILD_COMMIT: Final[str] = "0000000"
+
+BUILD_CONFIGURATION: Final[str] = "Development"
+
+BUILD_PLATFORM: Final[str] = "Python 3.12"
+
+# ============================================================================
+# Release Status
+# ============================================================================
+#
+# Indicates the maturity level of the current build.
+#
+# These values are descriptive only and may be used by future About dialogs,
+# logging systems or diagnostics.
+# ============================================================================
+
+RELEASE_STATUS: Final[Literal[
+    "Development",
+    "Alpha",
+    "Beta",
+    "Release Candidate",
+    "Production",
+]] = "Development"
+
+
+# ============================================================================
+# Application Limits
+# ============================================================================
+#
+# This section defines the practical upper limits used throughout the Cricket
+# Tournament Workbook.
+#
+# Purpose
+# -------
+#
+# These limits are not intended to represent the absolute capabilities of
+# Microsoft Excel. Instead, they define the maximum values that the application
+# is designed to support efficiently.
+#
+# Benefits of Centralising Limits
+# -------------------------------
+#
+# • Prevents "magic numbers" throughout the codebase.
+# • Simplifies workbook validation.
+# • Enables consistent input validation.
+# • Provides predictable workbook performance.
+# • Documents application assumptions.
+# • Makes future scaling straightforward.
+#
+# Individual tournaments may use significantly smaller values. These constants
+# simply represent the application's supported design limits.
+#
+# Excel itself supports far larger datasets than those defined here, but very
+# large workbooks become slower to generate, validate and calculate.
+# ============================================================================
+
+# ============================================================================
+# Tournament Limits
+# ============================================================================
+#
+# Maximum number of tournaments expected within a single workbook.
+#
+# Although the current workbook is primarily intended for one tournament,
+# future versions may support multiple tournaments sharing lookup data.
+# ============================================================================
+
+MAX_TOURNAMENTS: Final[int] = 10
+
+# ============================================================================
+# Team Limits
+# ============================================================================
+#
+# Maximum number of teams.
+#
+# This comfortably accommodates leagues, pools and knockout tournaments while
+# maintaining good workbook performance.
+# ============================================================================
+
+MAX_TEAMS: Final[int] = 128
+
+# ============================================================================
+# Player Limits
+# ============================================================================
+#
+# Maximum registered players.
+#
+# Supports large club competitions while remaining well within Excel's
+# practical performance limits.
+# ============================================================================
+
+MAX_PLAYERS: Final[int] = 5000
+
+# ============================================================================
+# Match Officials
+# ============================================================================
+#
+# Includes umpires, referees, scorers and other recognised officials.
+# ============================================================================
+
+MAX_OFFICIALS: Final[int] = 500
+
+# ============================================================================
+# Venue Limits
+# ============================================================================
+#
+# Maximum number of cricket grounds or venues maintained in the workbook.
+# ============================================================================
+
+MAX_VENUES: Final[int] = 250
+
+# ============================================================================
+# Match Limits
+# ============================================================================
+#
+# Maximum fixtures recorded in one workbook.
+#
+# This supports multiple seasons, league stages and knockout competitions.
+# ============================================================================
+
+MAX_MATCHES: Final[int] = 5000
+
+# ============================================================================
+# Innings Limits
+# ============================================================================
+#
+# Default maximum innings supported for a single match.
+#
+# This aligns with the application's limited-overs focus while allowing future
+# extensions for multi-innings formats.
+# ============================================================================
+
+APPLICATION_MAX_INNINGS: Final[int] = MAX_INNINGS
+
+# ============================================================================
+# Delivery Limits
+# ============================================================================
+#
+# Maximum legal deliveries stored for a single innings.
+#
+# Calculated using the application's maximum overs and standard six-ball over.
+# This intentionally excludes additional wides and no-balls.
+# ============================================================================
+
+MAX_LEGAL_BALLS_PER_INNINGS: Final[int] = (
+    DEFAULT_MAX_OVERS * BALLS_PER_OVER
+)
+
+# ============================================================================
+# Score Limits
+# ============================================================================
+#
+# Practical upper scoring limit for validation purposes.
+#
+# This is intentionally generous and is not intended to represent a realistic
+# cricket score.
+# ============================================================================
+
+MAX_TEAM_SCORE: Final[int] = 9999
+
+# ============================================================================
+# Partnership Limits
+# ============================================================================
+#
+# Maximum partnerships in a completed innings.
+#
+# An innings with ten wickets contains eleven batting partnerships,
+# including the final unbroken partnership when applicable.
+# ============================================================================
+
+MAX_PARTNERSHIPS: Final[int] = 11
+
+# ============================================================================
+# Over Limits
+# ============================================================================
+#
+# Practical maximum overs supported by the workbook.
+#
+# Future tournaments may override DEFAULT_MAX_OVERS while remaining below this
+# application-wide ceiling.
+# ============================================================================
+
+APPLICATION_MAX_OVERS: Final[int] = 100
+
+APPLICATION_MIN_OVERS: Final[int] = 1
+
+# ============================================================================
+# Worksheet Limits
+# ============================================================================
+#
+# Maximum number of worksheets expected within the workbook.
+#
+# Excel supports significantly more worksheets; this limit exists to maintain
+# a manageable workbook structure.
+# ============================================================================
+
+MAX_WORKSHEETS: Final[int] = 100
+
+# ============================================================================
+# Workbook Size Assumptions
+# ============================================================================
+#
+# These values document the workbook size assumptions used during design.
+#
+# They are not enforced by Excel itself but provide useful guidance for
+# validation, diagnostics and future optimisation.
+# ============================================================================
+
+ASSUMED_MAX_WORKBOOK_SIZE_MB: Final[int] = 50
+
+ASSUMED_MAX_ROWS_PER_WORKSHEET: Final[int] = 50000
+
+ASSUMED_MAX_COLUMNS_PER_WORKSHEET: Final[int] = 100
+
+ASSUMED_MAX_NAMED_RANGES: Final[int] = 500
+
+ASSUMED_MAX_DATA_VALIDATIONS: Final[int] = 10000
+
+# ============================================================================
+# Performance Thresholds
+# ============================================================================
+#
+# Soft thresholds that may be used by future diagnostics to warn users when a
+# workbook is approaching sizes where performance could begin to degrade.
+# ============================================================================
+
+PERFORMANCE_WARNING_MATCHES: Final[int] = 2500
+
+PERFORMANCE_WARNING_PLAYERS: Final[int] = 2500
+
+PERFORMANCE_WARNING_FILE_SIZE_MB: Final[int] = 25
+
+# ============================================================================
+# Public Module Interface
+# ============================================================================
+#
+# This final section defines the public API exported by constants.py.
+#
+# Rather than manually maintaining a potentially very large tuple of exported
+# names, the module automatically exports every documented constant while
+# excluding imported symbols and private implementation names.
+#
+# Export Rules
+# ------------
+#
+# A name is exported if:
+#
+# • It does not begin with "_".
+# • It is not an imported typing helper.
+# • It is not a module object.
+# • It is not one of the standard module metadata variables.
+#
+# This approach ensures:
+#
+# • Newly added constants automatically become part of the public API.
+# • No maintenance is required when constants are added or removed.
+# • All project modules receive a consistent interface.
+#
+# Future developers should continue documenting every constant where it is
+# declared. This section intentionally performs no validation or runtime logic
+# beyond constructing the public export list.
+# ============================================================================
+
+# Module metadata and imported helper names that should not be exported.
+_EXCLUDED_EXPORTS: Final[frozenset[str]] = frozenset(
+    {
+        "__all__",
+        "__author__",
+        "__builtins__",
+        "__cached__",
+        "__doc__",
+        "__file__",
+        "__loader__",
+        "__name__",
+        "__package__",
+        "__spec__",
+        "__version__",
+        "annotations",
+        "Final",
+        "Literal",
+    }
+)
+
+# Public API
+#
+# Export every documented constant defined in this module while excluding
+# implementation details and imported helper symbols.
+__all__: tuple[str, ...] = tuple(
+    sorted(
+        name
+        for name in globals()
+        if not name.startswith("_")
+        and name not in _EXCLUDED_EXPORTS
+    )
+)
