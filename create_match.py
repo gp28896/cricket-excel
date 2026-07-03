@@ -1411,3 +1411,859 @@ class MatchSheetBuilder:
             last_data_row - first_data_row + 1,
         )
 
+    ###########################################################################
+    # Data Validation Integration
+    ###########################################################################
+
+    def apply_match_validations(self) -> None:
+        """Apply all match-specific data validations.
+
+        This method orchestrates the application of reusable validation rules
+        defined in ``validation.py``. No validation logic is implemented here;
+        every rule is delegated to the public validation helper APIs through
+        :class:`WorkbookBuilder`.
+
+        The following validation groups are applied where appropriate:
+
+        * Players
+        * Dismissals
+        * Extras
+        * Officials
+        * Toss Winner
+        * Toss Decision
+        * Bowling Style
+        * Batting Style
+        """
+        self._apply_player_validations()
+        self._apply_dismissal_validations()
+        self._apply_extra_validations()
+        self._apply_official_validations()
+        self._apply_toss_validations()
+        self._apply_bowling_style_validations()
+        self._apply_batting_style_validations()
+
+        self._logger.debug(
+            "Applied match data validations."
+        )
+
+    ###########################################################################
+    # Internal Validation Helpers
+    ###########################################################################
+
+    def _apply_player_validations(self) -> None:
+        """Apply player dropdown validations."""
+        self._builder.apply_validation_helper(
+            validation=player_validation(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_dismissal_validations(self) -> None:
+        """Apply dismissal dropdown validations."""
+        self._builder.apply_validation_helper(
+            validation=dismissal_validation(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_extra_validations(self) -> None:
+        """Apply extras dropdown validations."""
+        self._builder.apply_validation_helper(
+            validation=extras_validation(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_official_validations(self) -> None:
+        """Apply match official dropdown validations."""
+        self._builder.apply_validation_helper(
+            validation=official_validation(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_toss_validations(self) -> None:
+        """Apply toss-related dropdown validations."""
+        self._builder.apply_validation_helper(
+            validation=toss_winner_validation(),
+            worksheets=self._worksheets.values(),
+        )
+
+        self._builder.apply_validation_helper(
+            validation=toss_decision_validation(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_bowling_style_validations(self) -> None:
+        """Apply bowling style dropdown validations."""
+        self._builder.apply_validation_helper(
+            validation=bowling_style_validation(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_batting_style_validations(self) -> None:
+        """Apply batting style dropdown validations."""
+        self._builder.apply_validation_helper(
+            validation=batting_style_validation(),
+            worksheets=self._worksheets.values(),
+        )
+    ###########################################################################
+    # Formula Integration
+    ###########################################################################
+
+    def apply_match_formulas(self) -> None:
+        """Apply all match formulas using the shared formula infrastructure.
+
+        This method contains no Excel formula strings. Instead, it delegates
+        formula insertion to :class:`WorkbookBuilder`, which in turn uses the
+        reusable APIs provided by ``formulas.py``.
+
+        Formula groups applied include:
+
+        * Innings totals
+        * Batter strike rates
+        * Bowler economy rates
+        * Current run rate
+        * Required run rate
+        * Overs completed
+        * Remaining balls
+        * Target calculations
+        """
+        self._apply_total_formulas()
+        self._apply_batting_formulas()
+        self._apply_bowling_formulas()
+        self._apply_run_rate_formulas()
+        self._apply_target_formulas()
+
+        self._logger.debug(
+            "Applied shared match formulas."
+        )
+
+    ###########################################################################
+    # Internal Formula Helpers
+    ###########################################################################
+
+    def _apply_total_formulas(self) -> None:
+        """Apply innings total formulas."""
+        self._builder.apply_formula_helper(
+            formula=total_runs_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+        self._builder.apply_formula_helper(
+            formula=extras_total_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+        self._builder.apply_formula_helper(
+            formula=innings_total_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_batting_formulas(self) -> None:
+        """Apply batting-related formulas."""
+        self._builder.apply_formula_helper(
+            formula=strike_rate_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_bowling_formulas(self) -> None:
+        """Apply bowling-related formulas."""
+        self._builder.apply_formula_helper(
+            formula=economy_rate_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_run_rate_formulas(self) -> None:
+        """Apply run-rate calculations."""
+        self._builder.apply_formula_helper(
+            formula=run_rate_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+        self._builder.apply_formula_helper(
+            formula=required_run_rate_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+        self._builder.apply_formula_helper(
+            formula=overs_completed_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+        self._builder.apply_formula_helper(
+            formula=remaining_balls_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+    def _apply_target_formulas(self) -> None:
+        """Apply target-related formulas."""
+        self._builder.apply_formula_helper(
+            formula=target_formula(),
+            worksheets=self._worksheets.values(),
+        )
+
+    ###########################################################################
+    # Worksheet Navigation
+    ###########################################################################
+
+    def create_navigation(self) -> None:
+        """Create workbook navigation hyperlinks.
+
+        Navigation is added using the public hyperlink helper methods exposed
+        by :class:`WorkbookBuilder`. This method contains no hyperlink
+        implementation logic of its own.
+
+        Navigation includes:
+
+        * Home links
+        * Previous sheet
+        * Next sheet
+        * Summary links
+        * Scorecard links
+        * Hidden Data links
+        """
+        if not self._worksheet_order:
+            self.plan_match_sheets()
+
+        for index, sheet_name in enumerate(self._worksheet_order):
+            worksheet = self._worksheets.get(sheet_name)
+
+            if worksheet is None:
+                continue
+
+            previous_sheet = (
+                self._worksheet_order[index - 1]
+                if index > 0
+                else None
+            )
+
+            next_sheet = (
+                self._worksheet_order[index + 1]
+                if index < len(self._worksheet_order) - 1
+                else None
+            )
+
+            self._create_sheet_navigation(
+                worksheet=worksheet,
+                previous_sheet=previous_sheet,
+                next_sheet=next_sheet,
+            )
+
+        self._logger.debug(
+            "Created worksheet navigation."
+        )
+
+    ###########################################################################
+    # Internal Navigation Helpers
+    ###########################################################################
+
+    def _create_sheet_navigation(
+        self,
+        *,
+        worksheet: Worksheet,
+        previous_sheet: str | None,
+        next_sheet: str | None,
+    ) -> None:
+        """Create navigation hyperlinks for one worksheet.
+
+        Args:
+            worksheet:
+                Worksheet receiving navigation links.
+
+            previous_sheet:
+                Previous worksheet title.
+
+            next_sheet:
+                Next worksheet title.
+        """
+        summary_sheet = next(
+            (
+                name
+                for name in self._worksheet_order
+                if name.endswith("Summary")
+            ),
+            None,
+        )
+
+        scorecard_sheet = next(
+            (
+                name
+                for name in self._worksheet_order
+                if name.endswith("Scorecard")
+            ),
+            None,
+        )
+
+        hidden_sheet = next(
+            (
+                name
+                for name in self._worksheet_order
+                if name.endswith("Hidden Data")
+            ),
+            None,
+        )
+
+        if summary_sheet is not None:
+            self._builder.add_sheet_hyperlink(
+                worksheet=worksheet,
+                label="Home",
+                destination_sheet=summary_sheet,
+            )
+
+            self._builder.add_sheet_hyperlink(
+                worksheet=worksheet,
+                label="Summary",
+                destination_sheet=summary_sheet,
+            )
+
+        if previous_sheet is not None:
+            self._builder.add_sheet_hyperlink(
+                worksheet=worksheet,
+                label="Previous",
+                destination_sheet=previous_sheet,
+            )
+
+        if next_sheet is not None:
+            self._builder.add_sheet_hyperlink(
+                worksheet=worksheet,
+                label="Next",
+                destination_sheet=next_sheet,
+            )
+
+        if scorecard_sheet is not None:
+            self._builder.add_sheet_hyperlink(
+                worksheet=worksheet,
+                label="Scorecard",
+                destination_sheet=scorecard_sheet,
+            )
+
+        if hidden_sheet is not None:
+            self._builder.add_sheet_hyperlink(
+                worksheet=worksheet,
+                label="Hidden Data",
+                destination_sheet=hidden_sheet,
+            )
+
+    ###########################################################################
+    # Print Configuration
+    ###########################################################################
+
+    def configure_print_settings(self) -> None:
+        """Configure workbook print settings.
+
+        This method delegates all page setup operations to the public helper
+        methods exposed by :class:`WorkbookBuilder`.
+
+        Configuration includes:
+
+        * Page margins
+        * Headers
+        * Footers
+        * Scaling
+        * Page orientation
+        * Freeze panes
+
+        No page setup implementation exists in this module.
+        """
+        for worksheet in self._worksheets.values():
+            self._configure_worksheet_print_settings(worksheet)
+
+        self._logger.debug(
+            "Configured print settings for %d worksheets.",
+            len(self._worksheets),
+        )
+
+    ###########################################################################
+    # Internal Helpers
+    ###########################################################################
+
+    def _configure_worksheet_print_settings(
+        self,
+        worksheet: Worksheet,
+    ) -> None:
+        """Configure print settings for a single worksheet.
+
+        Args:
+            worksheet:
+                Worksheet receiving print configuration.
+        """
+        self._builder.apply_page_margins(
+            worksheet=worksheet,
+        )
+
+        self._builder.apply_page_header(
+            worksheet=worksheet,
+            title=self._config.tournament,
+        )
+
+        self._builder.apply_page_footer(
+            worksheet=worksheet,
+            footer_text=(
+                f"{self._config.home_team} vs "
+                f"{self._config.away_team}"
+            ),
+        )
+
+        self._builder.apply_page_scaling(
+            worksheet=worksheet,
+        )
+
+        self._builder.apply_page_orientation(
+            worksheet=worksheet,
+        )
+
+        self._builder.apply_freeze_panes(
+            worksheet=worksheet,
+        )
+
+    ###########################################################################
+    # Workbook Metadata
+    ###########################################################################
+
+    def populate_match_metadata(self) -> None:
+        """Populate workbook metadata for the current match.
+
+        This method stores match-specific metadata in the workbook by
+        delegating to the public metadata APIs provided by
+        :class:`WorkbookBuilder`.
+
+        Metadata recorded includes:
+
+        * Match ID
+        * Tournament
+        * Venue
+        * Match Date
+        * Teams
+        * Generator Version
+        * Generator Name
+        * Revision
+        """
+        metadata = self._build_match_metadata()
+
+        self._builder.set_workbook_metadata(
+            metadata=metadata,
+        )
+
+        self._logger.debug(
+            "Populated workbook metadata for match '%s vs %s'.",
+            self._config.home_team,
+            self._config.away_team,
+        )
+
+    ###########################################################################
+    # Internal Metadata Helpers
+    ###########################################################################
+
+    def _build_match_metadata(self) -> dict[str, str]:
+        """Build the metadata dictionary for the current match.
+
+        Returns:
+            Dictionary containing workbook metadata values.
+        """
+        match_id = (
+            self._metadata.get("match_id")
+            or f"{self._config.home_team}_vs_{self._config.away_team}_"
+               f"{self._config.match_date:%Y%m%d}"
+        )
+
+        return {
+            "Match ID": str(match_id),
+            "Tournament": self._config.tournament,
+            "Venue": self._config.venue,
+            "Date": self._config.match_date.isoformat(),
+            "Teams": (
+                f"{self._config.home_team} vs "
+                f"{self._config.away_team}"
+            ),
+            "Version": _MODULE_VERSION,
+            "Generator": self.__class__.__name__,
+            "Revision": "1",
+        }
+
+    ###########################################################################
+    # Match Orchestration Pipeline
+    ###########################################################################
+
+    def create_match(self) -> WorksheetMapping:
+        """Create and fully initialize a cricket match workbook.
+
+        This is the primary public entry point for match generation. It
+        coordinates the complete lifecycle without implementing workbook,
+        worksheet, styling, validation or formula logic directly.
+
+        Workflow:
+
+        1. Initialize the match.
+        2. Create all planned worksheets.
+        3. Populate default worksheet contents.
+        4. Finalize the workbook.
+
+        Returns:
+            Read-only mapping of worksheet names to worksheet objects.
+        """
+        self._logger.info(
+            "Creating match workbook: %s vs %s",
+            self._config.home_team,
+            self._config.away_team,
+        )
+
+        self.initialize_match()
+
+        self.create_all_match_sheets()
+
+        self.populate_defaults()
+
+        self.finalize_match()
+
+        self._logger.info(
+            "Match workbook creation completed successfully."
+        )
+
+        return self.worksheet_registry
+
+    ###########################################################################
+    # Match Creation
+    ###########################################################################
+
+    def create_all_match_sheets(self) -> WorksheetMapping:
+        """Create every worksheet required for the match.
+
+        Worksheet creation is delegated to previously implemented methods.
+        No worksheet creation logic is duplicated here.
+
+        Returns:
+            Read-only worksheet registry.
+        """
+        self.create_planned_worksheets()
+
+        self.create_match_summary_sheet()
+
+        self.create_playing_xi_sheet()
+
+        self.create_scorecard_sheet()
+
+        self.create_ball_log_sheet()
+
+        return self.worksheet_registry
+
+    ###########################################################################
+    # Initialization
+    ###########################################################################
+
+    def initialize_match(self) -> None:
+        """Initialize match generation.
+
+        This method prepares the builder state before worksheet creation.
+        """
+        self.plan_match_sheets()
+
+        self.populate_match_metadata()
+
+        self._logger.debug(
+            "Match initialization complete."
+        )
+
+    ###########################################################################
+    # Default Population
+    ###########################################################################
+
+    def populate_defaults(self) -> None:
+        """Populate default workbook content.
+
+        This method coordinates reusable workbook infrastructure for
+        validation, formulas and navigation.
+        """
+        self.apply_match_validations()
+
+        self.apply_match_formulas()
+
+        self.create_navigation()
+
+        self._logger.debug(
+            "Default worksheet content populated."
+        )
+
+    ###########################################################################
+    # Finalization
+    ###########################################################################
+
+    def finalize_match(self) -> None:
+        """Finalize the completed match workbook.
+
+        Finalization applies workbook-wide configuration after worksheet
+        creation has completed.
+
+        No formatting, protection or print logic is implemented here.
+        Everything is delegated to previously implemented methods.
+        """
+        self.configure_print_settings()
+
+        self.configure_protection()
+
+        self._builder.finalize_workbook()
+
+        self._logger.debug(
+            "Match workbook finalized."
+        )
+
+
+###############################################################################
+# Convenience Functions
+###############################################################################
+
+def create_match_workbook(
+    workbook_builder: WorkbookBuilder,
+    config: MatchConfig,
+) -> WorksheetMapping:
+    """Create a complete match workbook.
+
+    This is the primary functional API for callers that prefer a function
+    rather than instantiating :class:`MatchSheetBuilder` directly.
+
+    Args:
+        workbook_builder:
+            Initialized workbook builder.
+
+        config:
+            Match configuration.
+
+    Returns:
+        Mapping of worksheet names to worksheet objects.
+    """
+    return MatchSheetBuilder(
+        workbook_builder=workbook_builder,
+        config=config,
+    ).create_match()
+
+
+def create_t20_match(
+    workbook_builder: WorkbookBuilder,
+    config: MatchConfig,
+) -> WorksheetMapping:
+    """Create a Twenty20 match workbook.
+
+    The supplied configuration is reused with T20-specific settings.
+
+    Args:
+        workbook_builder:
+            Workbook builder.
+
+        config:
+            Base match configuration.
+
+    Returns:
+        Mapping of generated worksheets.
+    """
+    config.match_type = "T20"
+    config.overs = 20
+    config.innings_count = 2
+
+    return create_match_workbook(
+        workbook_builder=workbook_builder,
+        config=config,
+    )
+
+
+def create_odi_match(
+    workbook_builder: WorkbookBuilder,
+    config: MatchConfig,
+) -> WorksheetMapping:
+    """Create a One Day International match workbook.
+
+    Args:
+        workbook_builder:
+            Workbook builder.
+
+        config:
+            Base match configuration.
+
+    Returns:
+        Mapping of generated worksheets.
+    """
+    config.match_type = "ODI"
+    config.overs = 50
+    config.innings_count = 2
+
+    return create_match_workbook(
+        workbook_builder=workbook_builder,
+        config=config,
+    )
+
+
+def create_test_match(
+    workbook_builder: WorkbookBuilder,
+    config: MatchConfig,
+) -> WorksheetMapping:
+    """Create a Test match workbook.
+
+    Args:
+        workbook_builder:
+            Workbook builder.
+
+        config:
+            Base match configuration.
+
+    Returns:
+        Mapping of generated worksheets.
+    """
+    config.match_type = "Test"
+    config.overs = 450
+    config.innings_count = 4
+
+    return create_match_workbook(
+        workbook_builder=workbook_builder,
+        config=config,
+    )
+
+
+def create_super_over(
+    workbook_builder: WorkbookBuilder,
+    config: MatchConfig,
+) -> WorksheetMapping:
+    """Create a Super Over workbook.
+
+    Args:
+        workbook_builder:
+            Workbook builder.
+
+        config:
+            Base match configuration.
+
+    Returns:
+        Mapping of generated worksheets.
+    """
+    config.match_type = "Super Over"
+    config.overs = 1
+    config.innings_count = 2
+    config.super_over_enabled = True
+
+    return create_match_workbook(
+        workbook_builder=workbook_builder,
+        config=config,
+    )
+
+
+###############################################################################
+# Public Exports
+###############################################################################
+
+__all__.extend(
+    [
+        "create_match_workbook",
+        "create_t20_match",
+        "create_odi_match",
+        "create_test_match",
+        "create_super_over",
+    ]
+)
+
+###############################################################################
+# Module Finalization
+###############################################################################
+
+"""Module finalization for ``create_match.py``.
+
+This concluding section performs the final public API registration and records
+the architectural guarantees of the module.
+
+Compatibility
+-------------
+This module is designed to operate alongside:
+
+* constants.py
+* styles.py
+* validation.py
+* formulas.py
+* workbook.py
+
+Architecture
+------------
+create_match.py intentionally remains an orchestration layer.
+
+Responsibilities retained here:
+
+* Match configuration
+* Match worksheet planning
+* Match worksheet orchestration
+* Workbook coordination
+* Public convenience APIs
+
+Responsibilities delegated elsewhere:
+
+* Workbook construction          -> workbook.py
+* Styling                        -> styles.py
+* Data validation implementation -> validation.py
+* Formula implementation         -> formulas.py
+* Shared constants               -> constants.py
+
+No workbook implementation logic is duplicated here.
+
+Public API
+----------
+The following objects are intended for external use:
+
+* MatchConfig
+* MatchSheetBuilder
+* create_match_workbook()
+* create_t20_match()
+* create_odi_match()
+* create_test_match()
+* create_super_over()
+
+Python Version
+--------------
+Python 3.12+
+
+Implementation Notes
+--------------------
+All workbook interactions are expected to occur through the public API
+provided by ``WorkbookBuilder``. Future enhancements should continue to
+delegate workbook responsibilities rather than implementing duplicate logic
+within this module.
+"""
+
+###############################################################################
+# Public API
+###############################################################################
+
+__all__ = sorted(
+    {
+        *(__all__ if "__all__" in globals() else []),
+        "MatchConfig",
+        "MatchSheetBuilder",
+        "create_match_workbook",
+        "create_t20_match",
+        "create_odi_match",
+        "create_test_match",
+        "create_super_over",
+    }
+)
+
+###############################################################################
+# Compatibility Verification
+###############################################################################
+
+# The following references intentionally verify that the expected public
+# interfaces remain importable. They also serve as explicit documentation of
+# this module's external dependencies.
+
+_COMPATIBILITY_DEPENDENCIES: Final[tuple[str, ...]] = (
+    "constants",
+    "styles",
+    "validation",
+    "formulas",
+    "workbook",
+)
+
+###############################################################################
+# Naming Consistency
+###############################################################################
+
+# Public API naming conventions:
+#
+# * Classes: PascalCase
+# * Functions: snake_case
+# * Internal helpers: prefixed with "_"
+# * Constants: UPPER_CASE
+# * Internal constants: "_UPPER_CASE"
+
+###############################################################################
+# End of Module
+###############################################################################
