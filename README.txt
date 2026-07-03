@@ -1,31 +1,33 @@
 
-Step	File				Why first?              				                        Estimated Size
-1	formulas.py			Pure calculations; no workbook dependency.	                         500–800 lines
-2	validation.py		Dropdowns, validations, constants. Used everywhere.       			    300–600 lines
-3	workbook.py			Creates workbook, sheets, styles, tables. Depends on 1 & 2.	         2,000–3,000 lines
+Step	File				Why first?              				                (Estimated) Size (with comments)
+1	formulas.py			Pure calculations; no workbook dependency.	                         3,000 lines
+2	validation.py		Dropdowns, validations, constants. Used everywhere.       			    3,112 lines
+3	workbook.py			Creates workbook, sheets, styles, tables. Depends on 1 & 2.	           5,008 lines
+4	create_match.py		Uses workbook helpers to generate match sheets.				    2,269 lines
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~            current progress          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-4	create_match.py		Uses workbook helpers to generate match sheets.				    600–1,000 lines
-5	scorecard.py		Generates batting, bowling, innings summaries.				           700–1,200 lines
-6	leaderboard.py		Tournament standings and NRR calculations.				    700–1,200 lines
-7	score_ball.py		Core scoring engine. Uses almost every other module.		                  1,500–2,500 lines
-8	generate_workbook.py	Thin entry point that wires everything together.		                       100–200 lines
+5	scorecard.py		Generates batting, bowling, innings summaries.				           2,500 lines
+6	leaderboard.py		Tournament standings and NRR calculations.				    2,500 lines
+7	score_ball.py		Core scoring engine. Uses almost every other module.		                  3,500 lines
+8	generate_workbook.py	Thin entry point that wires everything together.		                       1,000 lines
 
 
 MINGW64 ~/Desktop/GitHub Projects/cricket excel (main)
+
 $ cloc .
-       5 text files.
-       5 unique files.
+       7 text files.
+       6 unique files.
        7 files ignored.
 
-github.com/AlDanial/cloc v 2.08  T=0.18 s (27.9 files/s, 67480.7 lines/s)
+github.com/AlDanial/cloc v 2.08  T=0.20 s (30.2 files/s, 72419.8 lines/s)
 -------------------------------------------------------------------------------
 Language                     files          blank        comment           code
 -------------------------------------------------------------------------------
-Python                           4           2591           5138           4375
-Text                             1              1              0              9
+Python                           5           3077           5910           5386
+Text                             1              4              0             27
 -------------------------------------------------------------------------------
-SUM:                             5           2592           5138           4384
+SUM:                             6           3081           5910           5413
 -------------------------------------------------------------------------------
-Lines of code written ~ 4,000
-Lines of Code to be written ~ 7,200
-Project Progress percent based on lines of code: 37.79 %
+
+Lines of code written ~ 5,413 (13,389 including comments)
+Lines of Code to be written ~ 9,500 including comments 
+Project Progress percent based on lines of code including comments: 58.50 %
