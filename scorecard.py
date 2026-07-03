@@ -1567,3 +1567,823 @@ class ScorecardBuilder:
         )
 
         self.logger.debug("Applied fielder validation.")
+
+
+
+    ###########################################################################
+    # Formula Integration
+    ###########################################################################
+
+    def populate_formula_fields(
+        self,
+        worksheet: Worksheet,
+        innings: InningsRecord,
+    ) -> None:
+        """Populate all calculated scorecard fields.
+
+        This method centralizes every formula-driven value required by the
+        scorecard. All mathematical calculations are delegated exclusively to
+        ``formulas.py`` while worksheet interaction is delegated to
+        ``workbook.py``.
+
+        The following calculated fields are populated:
+
+        * Batting strike rates
+        * Bowling economy rates
+        * Innings totals
+        * Total extras
+        * Current run rate
+        * Remaining balls
+        * Required run rate
+
+        No calculation logic is implemented directly within this module.
+
+        Args:
+            worksheet:
+                Destination scorecard worksheet.
+
+            innings:
+                Mapping containing innings statistics.
+
+        Raises:
+            TypeError:
+                If invalid arguments are supplied.
+
+            RuntimeError:
+                If workbook helpers have not been initialized.
+        """
+        if not isinstance(worksheet, Worksheet):
+            raise TypeError("worksheet must be an openpyxl Worksheet.")
+
+        if not isinstance(innings, Mapping):
+            raise TypeError("innings must implement Mapping.")
+
+        helper = self.workbook_helper
+
+        if helper is None:
+            raise RuntimeError(
+                "Workbook helper has not been initialized."
+            )
+
+        self.logger.info("Populating calculated scorecard fields.")
+
+        self._populate_batting_formula_fields(
+            worksheet=worksheet,
+            batters=innings.get("batters", ()),
+        )
+
+        self._populate_bowling_formula_fields(
+            worksheet=worksheet,
+            bowlers=innings.get("bowlers", ()),
+        )
+
+        self._populate_summary_formula_fields(
+            worksheet=worksheet,
+            innings=innings,
+        )
+
+        self.logger.debug(
+            "Completed formula integration for innings %d.",
+            self.config.innings_number,
+        )
+
+    def _populate_batting_formula_fields(
+        self,
+        worksheet: Worksheet,
+        batters: Sequence[PlayerRecord],
+    ) -> None:
+        """Populate batting formula fields."""
+        helper = self.workbook_helper
+
+        for batting_position, batter in enumerate(batters, start=1):
+            row = helper.get_batting_row(
+                worksheet=worksheet,
+                batting_position=batting_position,
+            )
+
+            helper.write_formula(
+                worksheet=worksheet,
+                row=row,
+                field="STRIKE_RATE",
+                formula=calculate_run_rate(
+                    runs=int(batter.get("runs", 0)),
+                    legal_balls=int(batter.get("balls", 0)),
+                ),
+            )
+
+    def _populate_bowling_formula_fields(
+        self,
+        worksheet: Worksheet,
+        bowlers: Sequence[BowlerRecord],
+    ) -> None:
+        """Populate bowling formula fields."""
+        helper = self.workbook_helper
+
+        for bowling_position, bowler in enumerate(bowlers, start=1):
+            row = helper.get_bowling_row(
+                worksheet=worksheet,
+                bowling_position=bowling_position,
+            )
+
+            helper.write_formula(
+                worksheet=worksheet,
+                row=row,
+                field="ECONOMY",
+                formula=calculate_run_rate(
+                    runs=int(bowler.get("runs", 0)),
+                    legal_balls=int(bowler.get("legal_balls", 0)),
+                ),
+            )
+
+    def _populate_summary_formula_fields(
+        self,
+        worksheet: Worksheet,
+        innings: InningsRecord,
+    ) -> None:
+        """Populate innings summary formula fields."""
+        helper = self.workbook_helper
+
+        total_runs = int(innings.get("total_runs", 0))
+        legal_balls = int(innings.get("legal_balls", 0))
+
+        byes = int(innings.get("byes", 0))
+        leg_byes = int(innings.get("leg_byes", 0))
+        wides = int(innings.get("wides", 0))
+        no_balls = int(innings.get("no_balls", 0))
+        penalty = int(innings.get("penalty", 0))
+
+        helper.write_formula(
+            worksheet=worksheet,
+            field="TOTAL_EXTRAS",
+            formula=calculate_total_extras(
+                byes=byes,
+                leg_byes=leg_byes,
+                wides=wides,
+                no_balls=no_balls,
+                penalty=penalty,
+            ),
+        )
+
+        helper.write_formula(
+            worksheet=worksheet,
+            field="RUN_RATE",
+            formula=calculate_run_rate(
+                runs=total_runs,
+                legal_balls=legal_balls,
+            ),
+        )
+
+        if self.config.target is not None:
+            runs_required = max(
+                self.config.target - total_runs,
+                0,
+            )
+
+            balls_remaining = remaining_balls(
+                max_overs=self.config.max_overs,
+                legal_balls=legal_balls,
+            )
+
+            helper.write_formula(
+                worksheet=worksheet,
+                field="REMAINING_BALLS",
+                formula=balls_remaining,
+            )
+
+            helper.write_formula(
+                worksheet=worksheet,
+                field="REQUIRED_RUN_RATE",
+                formula=calculate_required_run_rate(
+                    runs_required=runs_required,
+                    legal_balls_remaining=balls_remaining,
+                ),
+            )
+
+        helper.write_formula(
+            worksheet=worksheet,
+            field="TOTAL",
+            formula=calculate_innings_total(
+                batters=innings.get("batters", ()),
+                extras=calculate_total_extras(
+                    byes=byes,
+                    leg_byes=leg_byes,
+                    wides=wides,
+                    no_balls=no_balls,
+                    penalty=penalty,
+                ),
+            ),
+        )
+
+
+    ###########################################################################
+    # Statistics Generation
+    ###########################################################################
+
+    def populate_statistics(
+        self,
+        worksheet: Worksheet,
+        innings: InningsRecord,
+    ) -> None:
+        """Populate innings statistical summaries.
+
+        This method generates and writes commonly used innings statistics.
+        All statistical calculations are delegated exclusively to
+        ``formulas.py`` while worksheet interaction is delegated to the
+        helper APIs provided by ``workbook.py``.
+
+        Statistics generated include:
+
+        * Highest scorer
+        * Best bowling figures
+        * Total boundaries
+        * Total dot balls
+        * Maiden overs
+        * Highest partnership
+
+        Args:
+            worksheet:
+                Destination scorecard worksheet.
+
+            innings:
+                Structured innings record.
+
+        Raises:
+            TypeError:
+                If supplied arguments are invalid.
+
+            RuntimeError:
+                If workbook helpers have not been initialized.
+        """
+        if not isinstance(worksheet, Worksheet):
+            raise TypeError("worksheet must be an openpyxl Worksheet.")
+
+        if not isinstance(innings, Mapping):
+            raise TypeError("innings must implement Mapping.")
+
+        helper = self.workbook_helper
+
+        if helper is None:
+            raise RuntimeError(
+                "Workbook helper has not been initialized."
+            )
+
+        self.logger.info("Generating innings statistics.")
+
+        batters = innings.get("batters", ())
+        bowlers = innings.get("bowlers", ())
+        partnerships = innings.get("partnerships", ())
+
+        helper.write_named_value(
+            worksheet=worksheet,
+            field="HIGHEST_SCORER",
+            value=highest_scorer(batters),
+        )
+
+        helper.write_named_value(
+            worksheet=worksheet,
+            field="BEST_BOWLING",
+            value=best_bowling_figures(bowlers),
+        )
+
+        helper.write_formula(
+            worksheet=worksheet,
+            field="BOUNDARIES",
+            formula=calculate_total_boundaries(batters),
+        )
+
+        helper.write_formula(
+            worksheet=worksheet,
+            field="DOT_BALLS",
+            formula=calculate_dot_balls(bowlers),
+        )
+
+        helper.write_formula(
+            worksheet=worksheet,
+            field="MAIDEN_OVERS",
+            formula=calculate_maiden_overs(bowlers),
+        )
+
+        helper.write_named_value(
+            worksheet=worksheet,
+            field="PARTNERSHIP_RECORD",
+            value=highest_partnership(partnerships),
+        )
+
+        self.logger.debug(
+            "Statistics populated for innings %d.",
+            self.config.innings_number,
+        )
+
+
+    ###########################################################################
+    # Navigation Links
+    ###########################################################################
+
+    def register_navigation_links(self) -> None:
+        """Register all scorecard navigation hyperlinks.
+
+        This method creates the internal workbook hyperlinks used to navigate
+        between related worksheets. Hyperlink creation is delegated entirely to
+        reusable helper APIs provided by ``workbook.py``.
+
+        Navigation links include:
+
+        * Scorecard
+        * Ball Log
+        * Summary
+        * Statistics
+
+        No worksheet creation or score population occurs.
+
+        Raises:
+            RuntimeError:
+                If workbook helpers have not been initialized.
+        """
+        helper = self.workbook_helper
+
+        if helper is None:
+            raise RuntimeError(
+                "Workbook helper has not been initialized."
+            )
+
+        self.logger.info("Registering scorecard navigation links.")
+
+        self._register_scorecard_link()
+        self._register_ball_log_link()
+        self._register_summary_link()
+        self._register_statistics_link()
+
+        self.logger.debug("Navigation links successfully registered.")
+
+    def _register_scorecard_link(self) -> None:
+        """Create hyperlink to the scorecard worksheet."""
+        helper = self.workbook_helper
+
+        helper.create_navigation_link(
+            source=self.worksheet_cache["scorecard"],
+            destination=self.worksheet_cache["scorecard"],
+            link_name="SCORECARD",
+        )
+
+        self.logger.debug("Registered Scorecard hyperlink.")
+
+    def _register_ball_log_link(self) -> None:
+        """Create hyperlink to the ball log worksheet."""
+        helper = self.workbook_helper
+
+        helper.create_navigation_link(
+            source=self.worksheet_cache["scorecard"],
+            destination=self.worksheet_cache["ball_log"],
+            link_name="BALL_LOG",
+        )
+
+        self.logger.debug("Registered Ball Log hyperlink.")
+
+    def _register_summary_link(self) -> None:
+        """Create hyperlink to the summary worksheet."""
+        helper = self.workbook_helper
+
+        helper.create_navigation_link(
+            source=self.worksheet_cache["scorecard"],
+            destination=self.worksheet_cache["summary"],
+            link_name="SUMMARY",
+        )
+
+        self.logger.debug("Registered Summary hyperlink.")
+
+    def _register_statistics_link(self) -> None:
+        """Create hyperlink to the statistics worksheet."""
+        helper = self.workbook_helper
+
+        statistics_sheet = self.worksheet_cache.get(
+            "statistics",
+            self.worksheet_cache["summary"],
+        )
+
+        helper.create_navigation_link(
+            source=self.worksheet_cache["scorecard"],
+            destination=statistics_sheet,
+            link_name="STATISTICS",
+        )
+
+        self.logger.debug("Registered Statistics hyperlink.")
+
+
+    ###########################################################################
+    # Worksheet Protection & Print Configuration
+    ###########################################################################
+
+    def configure_worksheet(self) -> None:
+        """Configure worksheet protection and print settings.
+
+        This method applies all worksheet-level configuration required after
+        scorecard population has completed.
+
+        Configuration includes:
+
+        * Worksheet protection
+        * Unlocking scoring/input cells
+        * Freeze panes
+        * Print settings
+
+        All operations are delegated exclusively to helper APIs provided by
+        ``workbook.py``. No worksheet properties are manipulated directly by
+        this module.
+
+        Raises:
+            RuntimeError:
+                If workbook helpers have not been initialized.
+        """
+        helper = self.workbook_helper
+
+        if helper is None:
+            raise RuntimeError(
+                "Workbook helper has not been initialized."
+            )
+
+        self.logger.info(
+            "Applying worksheet protection and print configuration."
+        )
+
+        for worksheet in self.worksheet_cache.values():
+            self._configure_single_worksheet(worksheet)
+
+        self.logger.debug(
+            "Worksheet configuration completed for %d worksheet(s).",
+            len(self.worksheet_cache),
+        )
+
+    def _configure_single_worksheet(
+        self,
+        worksheet: Worksheet,
+    ) -> None:
+        """Configure a single worksheet.
+
+        Args:
+            worksheet:
+                Existing worksheet created by ``create_match.py``.
+        """
+        helper = self.workbook_helper
+
+        helper.unlock_scoring_cells(
+            worksheet=worksheet,
+        )
+
+        helper.configure_worksheet_protection(
+            worksheet=worksheet,
+        )
+
+        helper.configure_freeze_panes(
+            worksheet=worksheet,
+        )
+
+        helper.configure_print_settings(
+            worksheet=worksheet,
+        )
+
+        self.logger.debug(
+            "Configured worksheet '%s'.",
+            worksheet.title,
+        )
+
+
+    ###########################################################################
+    # Scorecard Orchestration
+    ###########################################################################
+
+    def build_scorecard(
+        self,
+        innings: InningsRecord,
+    ) -> None:
+        """Build a complete innings scorecard.
+
+        This is the primary orchestration entry point for scorecard generation.
+        It coordinates the existing builder functionality without introducing
+        duplicate rendering or calculation logic.
+
+        The workflow is intentionally linear:
+
+        1. Discover and validate worksheets.
+        2. Populate batting scorecard.
+        3. Populate bowling scorecard.
+        4. Populate innings summary.
+        5. Populate supporting sections.
+        6. Apply validations.
+        7. Populate calculated fields.
+        8. Generate statistics.
+        9. Register navigation links.
+        10. Configure worksheet protection.
+        11. Finalize the scorecard.
+
+        Args:
+            innings:
+                Structured innings data.
+
+        Raises:
+            RuntimeError:
+                If required worksheets cannot be located.
+        """
+        self.logger.info(
+            "Building scorecard for innings %d.",
+            self.config.innings_number,
+        )
+
+        self.register_sheet_references()
+
+        self.populate_batting(innings)
+        self.populate_bowling(innings)
+        self.populate_summary(innings)
+
+        scorecard_sheet = self.worksheet_cache["scorecard"]
+
+        self.populate_extras(
+            scorecard_sheet,
+            innings.get("extras", {}),
+        )
+
+        self.populate_fall_of_wickets(
+            scorecard_sheet,
+            innings.get("fall_of_wickets", ()),
+        )
+
+        self.populate_partnership_table(
+            scorecard_sheet,
+            innings.get("partnerships", ()),
+        )
+
+        self.apply_scorecard_validations()
+
+        self.populate_formula_fields(
+            scorecard_sheet,
+            innings,
+        )
+
+        self.populate_statistics(
+            scorecard_sheet,
+            innings,
+        )
+
+        self.register_navigation_links()
+
+        self.configure_worksheet()
+
+        self.finalize_scorecard()
+
+    def populate_batting(
+        self,
+        innings: InningsRecord,
+    ) -> None:
+        """Populate the batting scorecard.
+
+        Args:
+            innings:
+                Structured innings record.
+        """
+        self.populate_batting_scorecard(
+            worksheet=self.worksheet_cache["scorecard"],
+            batters=innings.get("batters", ()),
+        )
+
+    def populate_bowling(
+        self,
+        innings: InningsRecord,
+    ) -> None:
+        """Populate the bowling scorecard.
+
+        Args:
+            innings:
+                Structured innings record.
+        """
+        self.populate_bowling_scorecard(
+            worksheet=self.worksheet_cache["scorecard"],
+            bowlers=innings.get("bowlers", ()),
+        )
+
+    def populate_summary(
+        self,
+        innings: InningsRecord,
+    ) -> None:
+        """Populate the innings summary.
+
+        Args:
+            innings:
+                Structured innings record.
+        """
+        self.populate_innings_summary(
+            worksheet=self.worksheet_cache["scorecard"],
+            innings=innings,
+        )
+
+    def finalize_scorecard(self) -> None:
+        """Finalize scorecard generation.
+
+        Finalization activities are delegated to the workbook helper layer and
+        may include workbook recalculation flags, hyperlink refresh,
+        print-area updates or other post-processing operations.
+
+        No rendering logic is duplicated here.
+        """
+        helper = self.workbook_helper
+
+        if helper is None:
+            raise RuntimeError(
+                "Workbook helper has not been initialized."
+            )
+
+        helper.finalize_scorecard(
+            workbook=self.workbook,
+            worksheets=self.worksheet_cache,
+        )
+
+        self.logger.info(
+            "Completed scorecard generation for innings %d.",
+            self.config.innings_number,
+        )
+
+
+###############################################################################
+# Convenience Functions
+###############################################################################
+
+def build_scorecard(
+    workbook: Workbook,
+    worksheets: WorksheetMap,
+    config: ScorecardConfig,
+    innings: InningsRecord,
+) -> ScorecardBuilder:
+    """Build a scorecard for any supported innings.
+
+    This is the primary convenience entry point for callers that do not need
+    to interact with :class:`ScorecardBuilder` directly.
+
+    Args:
+        workbook:
+            Existing workbook created by ``create_match.py``.
+
+        worksheets:
+            Mapping of worksheet names to worksheet objects.
+
+        config:
+            Scorecard configuration.
+
+        innings:
+            Structured innings data.
+
+    Returns:
+        The initialized :class:`ScorecardBuilder` after scorecard generation.
+    """
+    builder = ScorecardBuilder(
+        workbook=workbook,
+        worksheets=worksheets,
+        config=config,
+    )
+
+    builder.build_scorecard(innings)
+
+    return builder
+
+
+def build_first_innings_scorecard(
+    workbook: Workbook,
+    worksheets: WorksheetMap,
+    config: ScorecardConfig,
+    innings: InningsRecord,
+) -> ScorecardBuilder:
+    """Build the first-innings scorecard."""
+    if config.innings_number != 1:
+        raise ValueError(
+            "build_first_innings_scorecard() requires innings_number == 1."
+        )
+
+    return build_scorecard(
+        workbook=workbook,
+        worksheets=worksheets,
+        config=config,
+        innings=innings,
+    )
+
+
+def build_second_innings_scorecard(
+    workbook: Workbook,
+    worksheets: WorksheetMap,
+    config: ScorecardConfig,
+    innings: InningsRecord,
+) -> ScorecardBuilder:
+    """Build the second-innings scorecard."""
+    if config.innings_number != 2:
+        raise ValueError(
+            "build_second_innings_scorecard() requires innings_number == 2."
+        )
+
+    return build_scorecard(
+        workbook=workbook,
+        worksheets=worksheets,
+        config=config,
+        innings=innings,
+    )
+
+
+def build_test_innings_scorecard(
+    workbook: Workbook,
+    worksheets: WorksheetMap,
+    config: ScorecardConfig,
+    innings: InningsRecord,
+) -> ScorecardBuilder:
+    """Build a Test-match innings scorecard.
+
+    This is a thin wrapper around :func:`build_scorecard`.
+    """
+    if config.match_type != "TEST":
+        raise ValueError(
+            "build_test_innings_scorecard() requires match_type='TEST'."
+        )
+
+    return build_scorecard(
+        workbook=workbook,
+        worksheets=worksheets,
+        config=config,
+        innings=innings,
+    )
+
+
+def update_scorecard(
+    builder: ScorecardBuilder,
+    innings: InningsRecord,
+) -> ScorecardBuilder:
+    """Update an existing scorecard.
+
+    This convenience wrapper reuses an existing
+    :class:`ScorecardBuilder` instance and invokes its orchestration logic.
+
+    Args:
+        builder:
+            Existing scorecard builder.
+
+        innings:
+            Updated innings data.
+
+    Returns:
+        The supplied builder instance.
+    """
+    if not isinstance(builder, ScorecardBuilder):
+        raise TypeError(
+            "builder must be an instance of ScorecardBuilder."
+        )
+
+    builder.build_scorecard(innings)
+
+    return builder
+
+###############################################################################
+# Module Finalization
+###############################################################################
+
+"""
+Finalization Notes
+------------------
+This completes the public API for ``scorecard.py``.
+
+Compatibility
+~~~~~~~~~~~~~
+The module is designed to integrate with the following project modules:
+
+* constants.py
+* formulas.py
+* validation.py
+* workbook.py
+* create_match.py
+
+Design Guarantees
+~~~~~~~~~~~~~~~~~
+* Scorecard rendering only.
+* No worksheet creation.
+* No duplicated statistical calculations.
+* Formula generation delegated to ``formulas.py``.
+* Workbook interaction delegated to ``workbook.py``.
+* Validation delegated to ``validation.py``.
+* Thin convenience wrappers for external callers.
+* Stable public API for future desktop, web and CLI front-ends.
+"""
+
+###############################################################################
+# Public API
+###############################################################################
+
+__all__.extend(
+    [
+        # Configuration
+        "ScorecardConfig",
+        # Primary builder
+        "ScorecardBuilder",
+        # Convenience functions
+        "build_scorecard",
+        "build_first_innings_scorecard",
+        "build_second_innings_scorecard",
+        "build_test_innings_scorecard",
+        "update_scorecard",
+    ]
+)
+
+# Keep exports deterministic and remove accidental duplicates introduced
+# during incremental generation.
+__all__ = sorted(set(__all__))
