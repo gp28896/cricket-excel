@@ -5,28 +5,28 @@ Step	File				Why first?              				                (Estimated) Size (with 
 3	workbook.py			Creates workbook, sheets, styles, tables. Depends on 1 & 2.	           5,008 lines
 4	create_match.py		Uses workbook helpers to generate match sheets.				    2,269 lines
 5	scorecard.py		Generates batting, bowling, innings summaries.				           2,400 lines
+6	leaderboard.py		Tournament standings and NRR calculations.				    4,000 lines
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~            current progress          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-6	leaderboard.py		Tournament standings and NRR calculations.				    2,500 lines
-7	score_ball.py		Core scoring engine. Uses almost every other module.		                  3,500 lines
-8	generate_workbook.py	Thin entry point that wires everything together.		                       1,000 lines
+7	score_ball.py		Core scoring engine. Uses almost every other module.		                  4,000 lines
+8	generate_workbook.py	Thin entry point that wires everything together.		                       2,000 lines
 
 
 MINGW64 ~/Desktop/GitHub Projects/cricket excel (main)
+cloc .
+       8 text files.
+       8 unique files.
+       3 files ignored.
 
-$ cloc .
-       7 text files.
-       7 unique files.
-       4 files ignored.
-
-github.com/AlDanial/cloc v 2.08  T=0.36 s (19.4 files/s, 46547.0 lines/s)
+github.com/AlDanial/cloc v 2.08  T=0.28 s (28.9 files/s, 75652.1 lines/s)
 -------------------------------------------------------------------------------
 Language                     files          blank        comment           code
 -------------------------------------------------------------------------------
-Python                           6           3590           6620           6552
-Text                             1              6              0             27
+Python                           7           4568           7651           8706
+Text                             1              5              0             27
 -------------------------------------------------------------------------------
-SUM:                             7           3596           6620           6579
+SUM:                             8           4573           7651           8733
 -------------------------------------------------------------------------------
-Lines of code written ~ 6,552 (15,789 including comments)
-Lines of Code to be written ~ 7,000 including comments 
-Project Progress percent based on lines of code including comments: 69.28 %
+
+Lines of code written ~ 8,700 (19,789 including comments)
+Lines of Code to be written ~ 6,000 including comments 
+Project Progress percent based on lines of code including comments: 76.73%
