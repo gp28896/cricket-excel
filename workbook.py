@@ -86,6 +86,11 @@ import logging
 from pathlib import Path
 from typing import Final
 from typing import TypeAlias
+from datetime import UTC, datetime
+from collections.abc import Iterable, Sequence
+
+from pathlib import Path
+from typing import BinaryIO, Final, Self
 
 ###############################################################################
 # Third-party imports
@@ -101,6 +106,24 @@ from openpyxl.styles import Protection
 from openpyxl.styles import Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
+from openpyxl.styles import NamedStyle
+from openpyxl.worksheet.page import PageMargins
+from openpyxl.worksheet.header_footer import HeaderFooter
+from openpyxl.styles import Font
+from openpyxl.worksheet.hyperlink import Hyperlink
+
+from contextlib import contextmanager
+from time import perf_counter
+
+from openpyxl.cell.cell import MergedCell
+from openpyxl.utils import (
+    column_index_from_string,
+    coordinate_from_string,
+    get_column_letter,
+    range_boundaries,
+)
+from openpyxl.utils.cell import rows_from_range
+
 
 ###############################################################################
 # Internal project imports
@@ -109,6 +132,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 import constants
 import formulas
 import validation
+from dataclasses import dataclass, field
 
 ###############################################################################
 # Type aliases
@@ -214,7 +238,7 @@ __all__: list[str] = []
 # Workbook configuration
 ###############################################################################
 
-from dataclasses import dataclass, field
+
 
 
 @dataclass(slots=True, kw_only=True)
@@ -1117,7 +1141,7 @@ class WorkbookBuilder:
 # WorkbookBuilder - Named style registration
 ###############################################################################
 
-from openpyxl.styles import NamedStyle
+
 
 
     def register_header_style(self) -> NamedStyle:
@@ -2544,8 +2568,6 @@ from openpyxl.workbook.defined_name import DefinedName
 # WorkbookBuilder - Page setup helpers
 ###############################################################################
 
-from openpyxl.worksheet.page import PageMargins
-from openpyxl.worksheet.header_footer import HeaderFooter
 
 
     def set_page_orientation(
@@ -3009,7 +3031,7 @@ from openpyxl.worksheet.header_footer import HeaderFooter
 # WorkbookBuilder - Workbook metadata helpers
 ###############################################################################
 
-from datetime import UTC, datetime
+
 
 
     def set_title(
@@ -3743,8 +3765,6 @@ from datetime import UTC, datetime
 # WorkbookBuilder - Hyperlink helpers
 ###############################################################################
 
-from openpyxl.styles import Font
-from openpyxl.worksheet.hyperlink import Hyperlink
 
 
     def add_internal_hyperlink(
@@ -4284,19 +4304,6 @@ from openpyxl.worksheet.hyperlink import Hyperlink
 # WorkbookBuilder - General helper utilities
 ###############################################################################
 
-from collections.abc import Iterable, Sequence
-from contextlib import contextmanager
-from time import perf_counter
-
-from openpyxl.cell.cell import MergedCell
-from openpyxl.utils import (
-    column_index_from_string,
-    coordinate_from_string,
-    get_column_letter,
-    range_boundaries,
-)
-from openpyxl.utils.cell import rows_from_range
-
 
     def write_cell(
         self,
@@ -4642,8 +4649,6 @@ from openpyxl.utils.cell import rows_from_range
 # WorkbookBuilder - Public API and convenience interface
 ###############################################################################
 
-from pathlib import Path
-from typing import BinaryIO, Final, Self
 
 from openpyxl import load_workbook as _load_workbook
 
