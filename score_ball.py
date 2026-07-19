@@ -1467,3 +1467,735 @@ for _symbol in (
 ):
     if _symbol not in __all__:
         __all__.append(_symbol)
+
+
+# ============================================================================
+# WICKET FOUNDATION — ENUMS & CONSTANTS
+# ============================================================================
+
+from enum import Enum
+from typing import Final, FrozenSet
+
+
+class DismissalKind(str, Enum):
+    """
+    Supported dismissal types.
+
+    Values intentionally use ICC terminology while also preserving
+    legacy compatibility where required.
+    """
+
+    NONE = "NONE"
+
+    # Bowler credited
+    BOWLED = "BOWLED"
+    CAUGHT = "CAUGHT"
+    LBW = "LBW"
+    STUMPED = "STUMPED"
+    HIT_WICKET = "HIT_WICKET"
+
+    # Not necessarily credited to bowler
+    RUN_OUT = "RUN_OUT"
+    OBSTRUCTING_THE_FIELD = "OBSTRUCTING_THE_FIELD"
+    HIT_BALL_TWICE = "HIT_BALL_TWICE"
+    TIMED_OUT = "TIMED_OUT"
+
+    # Retirement
+    RETIRED_OUT = "RETIRED_OUT"
+    RETIRED_HURT = "RETIRED_HURT"
+
+    # Legacy (Law removed but retained for workbook compatibility)
+    HANDLED_BALL = "HANDLED_BALL"
+
+
+# ----------------------------------------------------------------------------
+# Bowler credited wickets
+#
+# These dismissals increment:
+#   • Bowler wickets
+#   • Team wickets
+#   • Require a replacement batter
+# ----------------------------------------------------------------------------
+
+BOWLER_WICKETS: Final[FrozenSet[DismissalKind]] = frozenset(
+    {
+        DismissalKind.BOWLED,
+        DismissalKind.CAUGHT,
+        DismissalKind.LBW,
+        DismissalKind.STUMPED,
+        DismissalKind.HIT_WICKET,
+    }
+)
+
+
+# ----------------------------------------------------------------------------
+# Team wickets
+#
+# Every dismissal that legally counts as a wicket in the innings.
+# Retired Hurt is intentionally excluded because it is NOT a wicket.
+# ----------------------------------------------------------------------------
+
+TEAM_WICKETS: Final[FrozenSet[DismissalKind]] = frozenset(
+    {
+        DismissalKind.BOWLED,
+        DismissalKind.CAUGHT,
+        DismissalKind.LBW,
+        DismissalKind.RUN_OUT,
+        DismissalKind.STUMPED,
+        DismissalKind.HIT_WICKET,
+        DismissalKind.OBSTRUCTING_THE_FIELD,
+        DismissalKind.HIT_BALL_TWICE,
+        DismissalKind.TIMED_OUT,
+        DismissalKind.RETIRED_OUT,
+        DismissalKind.HANDLED_BALL,
+    }
+)
+
+
+# ----------------------------------------------------------------------------
+# Dismissals requiring the next batter to enter.
+#
+# Retired Hurt is intentionally excluded because the batter may resume
+# later under the Laws of Cricket.
+# ----------------------------------------------------------------------------
+
+NEW_BATTER_DISMISSALS: Final[FrozenSet[DismissalKind]] = frozenset(
+    {
+        DismissalKind.BOWLED,
+        DismissalKind.CAUGHT,
+        DismissalKind.LBW,
+        DismissalKind.RUN_OUT,
+        DismissalKind.STUMPED,
+        DismissalKind.HIT_WICKET,
+        DismissalKind.OBSTRUCTING_THE_FIELD,
+        DismissalKind.HIT_BALL_TWICE,
+        DismissalKind.TIMED_OUT,
+        DismissalKind.RETIRED_OUT,
+        DismissalKind.HANDLED_BALL,
+    }
+)
+
+
+# ----------------------------------------------------------------------------
+# Dismissals where a fielder identity may be recorded.
+#
+# Although not mandatory for every dismissal, these dismissal types can
+# legitimately reference a fielder in official scorecards.
+# ----------------------------------------------------------------------------
+
+FIELDER_REQUIRED_DISMISSALS: Final[FrozenSet[DismissalKind]] = frozenset(
+    {
+        DismissalKind.CAUGHT,
+        DismissalKind.RUN_OUT,
+        DismissalKind.STUMPED,
+        DismissalKind.OBSTRUCTING_THE_FIELD,
+    }
+)
+
+
+# ----------------------------------------------------------------------------
+# Dismissals that do NOT credit the bowler with a wicket.
+# ----------------------------------------------------------------------------
+
+BOWLER_NOT_CREDITED_DISMISSALS: Final[FrozenSet[DismissalKind]] = frozenset(
+    {
+        DismissalKind.RUN_OUT,
+        DismissalKind.OBSTRUCTING_THE_FIELD,
+        DismissalKind.HIT_BALL_TWICE,
+        DismissalKind.TIMED_OUT,
+        DismissalKind.RETIRED_OUT,
+        DismissalKind.RETIRED_HURT,
+        DismissalKind.HANDLED_BALL,
+    }
+)
+
+
+# ============================================================================
+# WICKET CLASSIFICATION HELPERS
+# ============================================================================
+
+def is_bowler_wicket(dismissal: DismissalKind) -> bool:
+    """
+    Determine whether the dismissal is credited to the bowler.
+
+    This helper centralizes the classification logic so that callers never
+    inspect dismissal types directly.
+
+    Parameters
+    ----------
+    dismissal:
+        The dismissal kind being evaluated.
+
+    Returns
+    -------
+    bool
+        True if the bowler receives a wicket; otherwise False.
+    """
+    return dismissal in BOWLER_WICKETS
+
+
+def counts_team_wicket(dismissal: DismissalKind) -> bool:
+    """
+    Determine whether the dismissal increments the batting side's wicket count.
+
+    Examples
+    --------
+    Counts:
+        - Bowled
+        - Caught
+        - Run Out
+        - Timed Out
+        - Retired Out
+
+    Does not count:
+        - None
+        - Retired Hurt
+
+    Parameters
+    ----------
+    dismissal:
+        The dismissal kind being evaluated.
+
+    Returns
+    -------
+    bool
+        True if the dismissal is recorded as a team wicket.
+    """
+    return dismissal in TEAM_WICKETS
+
+
+def requires_new_batter(dismissal: DismissalKind) -> bool:
+    """
+    Determine whether a replacement batter must enter immediately.
+
+    This helper intentionally distinguishes Retired Hurt from Retired Out.
+    Retired Hurt does not consume a wicket and the batter may legally
+    resume their innings later.
+
+    Parameters
+    ----------
+    dismissal:
+        The dismissal kind being evaluated.
+
+    Returns
+    -------
+    bool
+        True if a new batter is required before play continues.
+    """
+    return dismissal in NEW_BATTER_DISMISSALS
+
+
+def is_fielder_required(dismissal: DismissalKind) -> bool:
+    """
+    Determine whether the dismissal normally records an associated fielder.
+
+    Examples include:
+        - Catcher
+        - Wicketkeeper (stumping)
+        - Run-out participant
+        - Fielder involved in obstructing the field
+
+    The helper answers only whether a fielder identity is applicable,
+    not whether one has already been supplied.
+
+    Parameters
+    ----------
+    dismissal:
+        The dismissal kind being evaluated.
+
+    Returns
+    -------
+    bool
+        True if a fielder should be recorded for the dismissal.
+    """
+    return dismissal in FIELDER_REQUIRED_DISMISSALS
+
+
+# ============================================================================
+# IMMUTABLE WICKET MODELS
+# ============================================================================
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass(frozen=True, slots=True)
+class DismissalInfo:
+    """
+    Immutable description of a dismissal.
+
+    This model contains only the factual details describing how a wicket
+    occurred. It is intentionally independent of InningsState so it can be
+    safely embedded inside BallResult, scorecards, logs, replay data, audit
+    trails, and serialization formats.
+
+    Attributes
+    ----------
+    dismissal_type
+        Classification of the dismissal.
+
+    dismissed_batter_id
+        Identifier of the dismissed batter. None if no dismissal occurred.
+
+    bowler_id
+        Identifier of the bowler involved in the dismissal, when applicable.
+
+    fielder_id
+        Identifier of the primary fielder associated with the dismissal.
+        For example:
+            • Catcher
+            • Wicketkeeper (stumping)
+            • Run-out participant
+
+    description
+        Human-readable dismissal description suitable for scorecards or logs.
+
+    counts_as_team_wicket
+        Cached classification indicating whether the dismissal increments the
+        batting team's wicket count.
+
+    credited_to_bowler
+        Cached classification indicating whether the wicket is credited to the
+        bowler.
+    """
+
+    dismissal_type: DismissalKind = DismissalKind.NONE
+    dismissed_batter_id: Optional[str] = None
+    bowler_id: Optional[str] = None
+    fielder_id: Optional[str] = None
+    description: str = ""
+    counts_as_team_wicket: bool = False
+    credited_to_bowler: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class WicketOutcome:
+    """
+    Immutable result of wicket processing for a single delivery.
+
+    This model captures the state transition decisions made after dismissal
+    evaluation while remaining independent of InningsState mutation logic.
+
+    It is intended to be produced by wicket-processing helpers and consumed by
+    apply_delivery() when constructing the next immutable InningsState.
+
+    Attributes
+    ----------
+    dismissal
+        Complete dismissal information for the delivery.
+
+    wicket_increment
+        Number of wickets to add to the batting side (typically 0 or 1).
+
+    requires_new_batter
+        Indicates whether a replacement batter must enter before the next ball.
+
+    innings_complete
+        True if the wicket ends the innings (for example, all out).
+
+    next_striker_id
+        Batter identifier who should become striker after wicket processing.
+        None indicates the caller must determine the value.
+
+    next_non_striker_id
+        Batter identifier who should become non-striker after wicket
+        processing. None indicates the caller must determine the value.
+    """
+
+    dismissal: DismissalInfo
+    wicket_increment: int = 0
+    requires_new_batter: bool = False
+    innings_complete: bool = False
+    next_striker_id: Optional[str] = None
+    next_non_striker_id: Optional[str] = None
+
+
+
+# ============================================================================
+# DISMISSAL VALIDATION HELPERS
+# ============================================================================
+
+def validate_dismissed_batter(
+    dismissal: DismissalKind,
+    dismissed_batter_id: str | None,
+    state: "InningsState",
+) -> None:
+    """
+    Validate the dismissed batter for a dismissal.
+
+    Rules
+    -----
+    * No validation is required if no dismissal occurred.
+    * Every dismissal that counts as a wicket must identify a batter.
+    * The dismissed batter must currently be one of the two batters at the
+      wicket (striker or non-striker).
+
+    Parameters
+    ----------
+    dismissal
+        Dismissal classification.
+
+    dismissed_batter_id
+        Identifier of the dismissed batter.
+
+    state
+        Current immutable innings state.
+
+    Raises
+    ------
+    ValidationError
+        If the dismissed batter information is invalid.
+    """
+    if dismissal is DismissalKind.NONE:
+        return
+
+    if dismissed_batter_id is None:
+        raise ValidationError(
+            "A dismissed batter must be supplied for a dismissal."
+        )
+
+    if dismissed_batter_id not in state.batters:
+        raise ValidationError(
+            f"Unknown batter: {dismissed_batter_id!r}."
+        )
+
+    if dismissed_batter_id not in (
+        state.striker_id,
+        state.non_striker_id,
+    ):
+        raise ValidationError(
+            "Dismissed batter must currently be batting."
+        )
+
+
+def validate_credited_bowler(
+    dismissal: DismissalKind,
+    bowler_id: str | None,
+    state: "InningsState",
+) -> None:
+    """
+    Validate bowler attribution for a dismissal.
+
+    Rules
+    -----
+    * Bowler-credit dismissals require a bowler.
+    * Non-bowler dismissals must not specify a credited bowler.
+    * The supplied bowler must be the current bowler.
+
+    Parameters
+    ----------
+    dismissal
+        Dismissal classification.
+
+    bowler_id
+        Credited bowler identifier.
+
+    state
+        Current innings state.
+
+    Raises
+    ------
+    ValidationError
+        If bowler attribution is invalid.
+    """
+    if is_bowler_wicket(dismissal):
+        if bowler_id is None:
+            raise ValidationError(
+                "This dismissal requires a credited bowler."
+            )
+
+        if bowler_id != state.current_bowler_id:
+            raise ValidationError(
+                "Credited bowler must be the current bowler."
+            )
+
+        return
+
+    if bowler_id is not None:
+        raise ValidationError(
+            "This dismissal must not specify a credited bowler."
+        )
+
+
+def validate_credited_fielder(
+    dismissal: DismissalKind,
+    fielder_id: str | None,
+    state: "InningsState",
+) -> None:
+    """
+    Validate fielder attribution for a dismissal.
+
+    Rules
+    -----
+    * Dismissals requiring a fielder must supply one.
+    * Other dismissals must not specify a fielder.
+    * The supplied player must exist in the fielding side.
+
+    Parameters
+    ----------
+    dismissal
+        Dismissal classification.
+
+    fielder_id
+        Credited fielder identifier.
+
+    state
+        Current innings state.
+
+    Raises
+    ------
+    ValidationError
+        If fielder attribution is invalid.
+    """
+    if is_fielder_required(dismissal):
+        if fielder_id is None:
+            raise ValidationError(
+                "This dismissal requires a credited fielder."
+            )
+
+        if fielder_id not in state.bowling_team_players:
+            raise ValidationError(
+                f"Unknown fielding player: {fielder_id!r}."
+            )
+
+        return
+
+    if fielder_id is not None:
+        raise ValidationError(
+            "This dismissal must not specify a credited fielder."
+        )
+
+
+
+# ============================================================================
+# DISMISSAL BUILDER
+# ============================================================================
+
+def build_dismissal_info(
+    *,
+    dismissal_type: DismissalKind = DismissalKind.NONE,
+    state: "InningsState",
+    dismissed_batter_id: str | None = None,
+    bowler_id: str | None = None,
+    fielder_id: str | None = None,
+    description: str | None = None,
+) -> DismissalInfo:
+    """
+    Construct a fully validated immutable :class:`DismissalInfo`.
+
+    All dismissal validation is centralized here. The function delegates every
+    rule to the existing helper functions so that dismissal classification and
+    validation logic remain defined in a single location.
+
+    Parameters
+    ----------
+    dismissal_type
+        Type of dismissal.
+
+    state
+        Current innings state.
+
+    dismissed_batter_id
+        Batter dismissed by this delivery, if any.
+
+    bowler_id
+        Bowler credited with the dismissal when applicable.
+
+    fielder_id
+        Fielder involved in the dismissal when applicable.
+
+    description
+        Optional scorecard description. If omitted, a sensible default is
+        generated.
+
+    Returns
+    -------
+    DismissalInfo
+        A fully validated immutable dismissal description.
+
+    Raises
+    ------
+    ValidationError
+        Propagated from the validation helper functions.
+    """
+
+    # ------------------------------------------------------------------
+    # Validate supplied identifiers.
+    # ------------------------------------------------------------------
+    validate_dismissed_batter(
+        dismissal=dismissal_type,
+        dismissed_batter_id=dismissed_batter_id,
+        state=state,
+    )
+
+    validate_credited_bowler(
+        dismissal=dismissal_type,
+        bowler_id=bowler_id,
+        state=state,
+    )
+
+    validate_credited_fielder(
+        dismissal=dismissal_type,
+        fielder_id=fielder_id,
+        state=state,
+    )
+
+    # ------------------------------------------------------------------
+    # Derive immutable classification flags.
+    # ------------------------------------------------------------------
+    counts_as_team_wicket = counts_team_wicket(dismissal_type)
+    credited_to_bowler = is_bowler_wicket(dismissal_type)
+
+    # ------------------------------------------------------------------
+    # Populate a default description if one was not supplied.
+    # ------------------------------------------------------------------
+    if description is None:
+        if dismissal_type is DismissalKind.NONE:
+            description = ""
+        else:
+            description = dismissal_type.name.replace("_", " ").title()
+
+    return DismissalInfo(
+        dismissal_type=dismissal_type,
+        dismissed_batter_id=dismissed_batter_id,
+        bowler_id=bowler_id,
+        fielder_id=fielder_id,
+        description=description,
+        counts_as_team_wicket=counts_as_team_wicket,
+        credited_to_bowler=credited_to_bowler,
+    )
+
+
+
+# ============================================================================
+# WICKET FRAMEWORK — FINAL UTILITIES
+# ============================================================================
+#
+# These helpers intentionally remain independent of apply_delivery().
+# They provide a stable API for the dismissal application engine
+# implemented in Part 5L.
+# ============================================================================
+
+from typing import Final
+
+
+#: Maximum number of wickets that may fall from a single delivery.
+#: (Excludes retired dismissals occurring between deliveries.)
+MAX_WICKETS_PER_DELIVERY: Final[int] = 1
+
+
+def is_dismissal(dismissal: DismissalKind) -> bool:
+    """
+    Return True if the supplied value represents any dismissal.
+
+    This helper should be preferred over direct comparisons against
+    ``DismissalKind.NONE`` to keep dismissal detection centralized.
+    """
+    return dismissal is not DismissalKind.NONE
+
+
+def dismissal_requires_validation(dismissal: DismissalKind) -> bool:
+    """
+    Determine whether dismissal-specific validation should be executed.
+
+    Every dismissal except ``NONE`` requires validation.
+    """
+    return is_dismissal(dismissal)
+
+
+def dismissal_description(dismissal: DismissalKind) -> str:
+    """
+    Return the canonical human-readable description for a dismissal.
+
+    This function provides a single location for generating default
+    dismissal text throughout the scoring engine.
+    """
+    if dismissal is DismissalKind.NONE:
+        return ""
+
+    return dismissal.name.replace("_", " ").title()
+
+
+def dismissal_wicket_increment(dismissal: DismissalKind) -> int:
+    """
+    Return the number of team wickets contributed by the dismissal.
+
+    Centralizing this calculation ensures future law changes require
+    modification in only one location.
+    """
+    return int(counts_team_wicket(dismissal))
+
+
+def create_empty_dismissal() -> DismissalInfo:
+    """
+    Construct an immutable object representing 'no dismissal'.
+
+    This helper avoids repeated construction logic throughout the
+    scoring engine.
+    """
+    return DismissalInfo(
+        dismissal_type=DismissalKind.NONE,
+        dismissed_batter_id=None,
+        bowler_id=None,
+        fielder_id=None,
+        description="",
+        counts_as_team_wicket=False,
+        credited_to_bowler=False,
+    )
+
+
+EMPTY_DISMISSAL: Final[DismissalInfo] = create_empty_dismissal()
+
+
+def create_wicket_outcome(
+    dismissal: DismissalInfo = EMPTY_DISMISSAL,
+    *,
+    innings_complete: bool = False,
+    next_striker_id: str | None = None,
+    next_non_striker_id: str | None = None,
+) -> WicketOutcome:
+    """
+    Build a validated immutable WicketOutcome.
+
+    All derived values are computed using the shared dismissal helper
+    functions to avoid duplicated business rules.
+    """
+    return WicketOutcome(
+        dismissal=dismissal,
+        wicket_increment=dismissal_wicket_increment(
+            dismissal.dismissal_type
+        ),
+        requires_new_batter=requires_new_batter(
+            dismissal.dismissal_type
+        ),
+        innings_complete=innings_complete,
+        next_striker_id=next_striker_id,
+        next_non_striker_id=next_non_striker_id,
+    )
+
+
+EMPTY_WICKET_OUTCOME: Final[WicketOutcome] = create_wicket_outcome()
+
+
+def is_innings_all_out(
+    wickets_after_delivery: int,
+    wickets_per_innings: int,
+) -> bool:
+    """
+    Determine whether the innings has ended due to all wickets falling.
+
+    Parameters
+    ----------
+    wickets_after_delivery
+        Team wicket count after processing the current delivery.
+
+    wickets_per_innings
+        Maximum wickets permitted in the innings.
+
+    Returns
+    -------
+    bool
+        True if the batting side is all out.
+    """
+    return wickets_after_delivery >= wickets_per_innings
+
