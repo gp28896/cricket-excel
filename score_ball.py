@@ -5491,6 +5491,140 @@ def apply_wicket(
     return updated_state
 
 
+# ============================================================================
+# Part 5N-8 - Final integration utilities & cleanup
+# ============================================================================
+
+from typing import Final, Iterable, Tuple
+
+# The canonical sequence used by apply_wicket(). Keeping the pipeline in a
+# single constant makes future maintenance straightforward and ensures any
+# integration (including apply_delivery()) executes the same ordered stages.
+_WICKET_APPLICATION_PIPELINE: Final[
+    Tuple[callable, ...]
+] = (
+    _apply_batter_wicket_updates,
+    _apply_bowler_and_fielder_updates,
+    _apply_team_wicket_updates,
+    _apply_batting_order_progression,
+    _apply_innings_completion_updates,
+)
+
+
+def iter_wicket_application_pipeline() -> Iterable[callable]:
+    """
+    Return the ordered sequence of pure wicket application stages.
+
+    This helper exists primarily for future integration with
+    ``apply_delivery()`` and for unit testing of the orchestration pipeline.
+
+    Returns
+    -------
+    Iterable[callable]
+        Ordered immutable pipeline.
+    """
+    return _WICKET_APPLICATION_PIPELINE
+
+
+def apply_wicket_pipeline(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Execute the shared wicket application pipeline.
+
+    This helper intentionally performs no validation. Validation is the
+    responsibility of ``apply_wicket()`` so that external callers have a single
+    public entry point while internal integrations can safely reuse the
+    pipeline after validation has already occurred.
+
+    Parameters
+    ----------
+    state
+        Immutable innings state.
+
+    outcome
+        Validated wicket outcome.
+
+    Returns
+    -------
+    InningsState
+        Updated immutable innings state.
+    """
+    updated_state = state
+
+    for stage in _WICKET_APPLICATION_PIPELINE:
+        updated_state = stage(updated_state, outcome)
+
+    return updated_state
+
+
+def _normalize_wicket_outcome(
+    outcome: "WicketOutcome",
+) -> "WicketOutcome":
+    """
+    Return the canonical wicket outcome instance.
+
+    The current implementation simply returns the supplied object. A dedicated
+    helper is provided so future scoring-engine revisions may normalize legacy
+    outcome objects without changing the public API.
+    """
+    return outcome
+
+
+def _finalize_wicket_state(
+    state: "InningsState",
+) -> "InningsState":
+    """
+    Final immutable normalization step.
+
+    This function intentionally performs no mutations today. It provides a
+    stable extension point for future integrations (scorecard generation,
+    leaderboard updates, workbook synchronization and apply_delivery()) while
+    preserving the purity of the wicket application pipeline.
+    """
+    return state
+
+
+def apply_wicket(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Apply a wicket to an immutable innings state.
+
+    This is the public integration point used by the scoring engine.
+
+    Compatibility
+    -------------
+    Designed to operate with:
+
+    * InningsState
+    * WicketOutcome
+    * DismissalInfo
+    * BallResult
+    * scorecard.py
+    * leaderboard.py
+    * workbook.py
+
+    All state transitions are delegated to shared helper functions to ensure
+    the implementation remains pure, deterministic and easy to extend.
+    """
+    _validate_apply_wicket_inputs(state, outcome)
+
+    outcome = _normalize_wicket_outcome(outcome)
+
+    if not _requires_wicket_state_update(state, outcome):
+        return state
+
+    updated_state = apply_wicket_pipeline(
+        state,
+        outcome,
+    )
+
+    return _finalize_wicket_state(updated_state)
+
+
 
 
 
