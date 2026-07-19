@@ -3038,5 +3038,857 @@ def dispatch_wicket_processor(
     """
     return get_wicket_processor(dismissal_info.dismissal_type)
 
+# ============================================================================
+# Part 5M-1 — Dispatcher Helpers
+# ============================================================================
 
+from typing import Final
+
+
+# Supported dismissal types handled by the dispatcher.
+_SUPPORTED_DISMISSAL_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "bowled",
+        "caught",
+        "caught and bowled",
+        "caught and bowled",      # allow canonical spelling
+        "caught_and_bowled",      # internal style
+        "lbw",
+        "run out",
+        "run_out",
+        "stumped",
+        "hit wicket",
+        "hit_wicket",
+        "retired out",
+        "retired_out",
+    }
+)
+
+
+def _normalize_dismissal_type(value: str | None) -> str | None:
+    """
+    Normalize dismissal names into a canonical lowercase representation.
+
+    This helper intentionally accepts several common spellings so that the
+    dispatcher can remain tolerant of upstream parsing differences.
+    """
+    if value is None:
+        return None
+
+    dismissal = value.strip().lower()
+
+    aliases = {
+        "caught_and_bowled": "caught and bowled",
+        "caught and bow": "caught and bowled",
+        "caught and bowled": "caught and bowled",
+        "run_out": "run out",
+        "hit_wicket": "hit wicket",
+        "retired_out": "retired out",
+    }
+
+    return aliases.get(dismissal, dismissal)
+
+
+def _extract_dismissal_type(ball_input: BallInput) -> str | None:
+    """
+    Extract the dismissal type declared by the BallInput.
+
+    The function is intentionally defensive because different project stages
+    may expose the dismissal field under different names.
+    """
+
+    for attribute in (
+        "dismissal_type",
+        "wicket_type",
+        "kind",
+        "how_out",
+    ):
+        if hasattr(ball_input, attribute):
+            value = getattr(ball_input, attribute)
+            if value:
+                return _normalize_dismissal_type(str(value))
+
+    return None
+
+
+def _is_supported_dismissal_type(dismissal_type: str | None) -> bool:
+    """
+    Return True if the dismissal is implemented by the dispatcher.
+    """
+    if dismissal_type is None:
+        return False
+
+    return dismissal_type in _SUPPORTED_DISMISSAL_TYPES
+
+
+def _ball_represents_dismissal(ball_input: BallInput) -> bool:
+    """
+    Determine whether the delivery represents a wicket.
+
+    Existing project helper predicates are reused whenever available.
+    """
+
+    helper = globals().get("is_wicket_delivery")
+    if callable(helper):
+        return bool(helper(ball_input))
+
+    helper = globals().get("ball_has_wicket")
+    if callable(helper):
+        return bool(helper(ball_input))
+
+    dismissal = _extract_dismissal_type(ball_input)
+    return dismissal is not None
+
+
+def _should_process_wicket(ball_input: BallInput) -> bool:
+    """
+    Determine whether wicket processing should continue.
+
+    Returns False when the delivery does not represent a dismissal.
+    """
+    return _ball_represents_dismissal(ball_input)
+
+
+def _validate_wicket_dispatch_preconditions(
+    state: InningsState,
+    ball_input: BallInput,
+) -> str:
+    """
+    Validate all dispatcher preconditions.
+
+    Returns
+    -------
+    str
+        Canonical dismissal type.
+
+    Raises
+    ------
+    ValidationError
+        When the dismissal information is inconsistent.
+
+    Notes
+    -----
+    Individual wicket processors remain responsible for validating
+    dismissal-specific fields. The dispatcher validates only the common
+    preconditions shared by every dismissal.
+    """
+
+    dismissal_type = _extract_dismissal_type(ball_input)
+
+    if dismissal_type is None:
+        raise ValidationError(
+            "Dismissal delivery is missing a dismissal type."
+        )
+
+    if not _is_supported_dismissal_type(dismissal_type):
+        raise ValidationError(
+            f"Unsupported dismissal type: {dismissal_type!r}"
+        )
+
+    return dismissal_type
+
+
+# ============================================================================
+# Part 5M — Wicket Dispatcher
+# ============================================================================
+
+def process_wicket(
+    state: InningsState,
+    ball_input: BallInput,
+) -> WicketOutcome | None:
+    """
+    Dispatch wicket processing to the appropriate dismissal processor.
+
+    Responsibilities
+    ----------------
+    * Detect whether the delivery contains a dismissal.
+    * Validate shared dispatcher preconditions.
+    * Resolve the appropriate wicket processor.
+    * Reject unsupported or impossible dismissal combinations.
+    * Return None when no wicket occurred.
+
+    This function never mutates the supplied InningsState. All state mutation,
+    if any, is deferred until the caller applies the returned WicketOutcome.
+    """
+
+    if not _should_process_wicket(ball_input):
+        return None
+
+    dismissal_type = _validate_wicket_dispatch_preconditions(
+        state,
+        ball_input,
+    )
+
+    processor = get_wicket_processor(dismissal_type)
+
+    outcome = processor(
+        state=state,
+        ball_input=ball_input,
+    )
+
+    if outcome is None:
+        raise ValidationError(
+            f"Wicket processor for '{dismissal_type}' returned no outcome."
+        )
+
+    # Defensive verification that processor and dispatcher agree.
+    if hasattr(outcome, "dismissal_type"):
+        processor_type = _normalize_dismissal_type(
+            getattr(outcome, "dismissal_type")
+        )
+        if (
+            processor_type is not None
+            and processor_type != dismissal_type
+        ):
+            raise ValidationError(
+                "Processor returned an outcome for a different dismissal type."
+            )
+
+    return outcome
+
+
+# ============================================================================
+# Part 5M-2 — Dispatcher Validation
+# ============================================================================
+
+from typing import Iterable
+
+
+def _call_validation_helper(
+    helper_name: str,
+    *args: object,
+    **kwargs: object,
+) -> bool:
+    """
+    Invoke an existing validation helper when present.
+
+    This allows the dispatcher to transparently reuse validation logic added in
+    earlier parts (Part 5K and later) without duplicating implementation.
+
+    Returns
+    -------
+    bool
+        True if the helper was found and invoked, otherwise False.
+    """
+    helper = globals().get(helper_name)
+    if callable(helper):
+        helper(*args, **kwargs)
+        return True
+    return False
+
+
+def _get_ball_input_value(
+    ball_input: BallInput,
+    *names: str,
+) -> object | None:
+    """
+    Return the first matching BallInput attribute.
+
+    Several project stages may expose identical information using different
+    attribute names. This helper provides a single lookup mechanism.
+    """
+    for name in names:
+        if hasattr(ball_input, name):
+            return getattr(ball_input, name)
+    return None
+
+
+def _validate_required_dismissed_batter(
+    ball_input: BallInput,
+) -> None:
+    """
+    Validate that a dismissed batter has been supplied.
+
+    Existing project validation helpers are preferred whenever available.
+    """
+
+    if _call_validation_helper(
+        "validate_required_dismissed_batter",
+        ball_input,
+    ):
+        return
+
+    dismissed = _get_ball_input_value(
+        ball_input,
+        "dismissed_batter",
+        "out_batter",
+        "batter_out",
+    )
+
+    if dismissed is None:
+        raise ValidationError(
+            "Dismissed batter is required for a wicket."
+        )
+
+
+def _validate_required_credited_bowler(
+    dismissal_type: str,
+    ball_input: BallInput,
+) -> None:
+    """
+    Validate dismissals that must credit a bowler.
+
+    Run out and retired out are intentionally excluded.
+    """
+
+    if dismissal_type in {"run out", "retired out"}:
+        return
+
+    if _call_validation_helper(
+        "validate_required_credited_bowler",
+        dismissal_type,
+        ball_input,
+    ):
+        return
+
+    bowler = _get_ball_input_value(
+        ball_input,
+        "credited_bowler",
+        "bowler",
+    )
+
+    if bowler is None:
+        raise ValidationError(
+            f"Dismissal '{dismissal_type}' requires a credited bowler."
+        )
+
+
+def _validate_required_credited_fielder(
+    dismissal_type: str,
+    ball_input: BallInput,
+) -> None:
+    """
+    Validate dismissals that require a credited fielder.
+    """
+
+    if dismissal_type not in {
+        "caught",
+        "caught and bowled",
+        "run out",
+        "stumped",
+    }:
+        return
+
+    if dismissal_type == "caught and bowled":
+        # Bowler is implicitly the catcher.
+        return
+
+    if _call_validation_helper(
+        "validate_required_credited_fielder",
+        dismissal_type,
+        ball_input,
+    ):
+        return
+
+    fielder = _get_ball_input_value(
+        ball_input,
+        "credited_fielder",
+        "fielder",
+    )
+
+    if fielder is None:
+        raise ValidationError(
+            f"Dismissal '{dismissal_type}' requires a credited fielder."
+        )
+
+
+def _validate_supported_dismissal_type(
+    dismissal_type: str,
+) -> None:
+    """
+    Validate that the dispatcher supports the dismissal.
+    """
+
+    if _call_validation_helper(
+        "validate_supported_dismissal_type",
+        dismissal_type,
+    ):
+        return
+
+    if not _is_supported_dismissal_type(dismissal_type):
+        raise ValidationError(
+            f"Unsupported dismissal type: {dismissal_type!r}"
+        )
+
+
+def _validate_impossible_dismissal_combinations(
+    dismissal_type: str,
+    ball_input: BallInput,
+) -> None:
+    """
+    Reject dismissal combinations that are impossible under the Laws of Cricket.
+    """
+
+    if _call_validation_helper(
+        "validate_impossible_dismissal_combinations",
+        dismissal_type,
+        ball_input,
+    ):
+        return
+
+    has_fielder = (
+        _get_ball_input_value(
+            ball_input,
+            "credited_fielder",
+            "fielder",
+        )
+        is not None
+    )
+
+    if dismissal_type == "bowled" and has_fielder:
+        raise ValidationError(
+            "Bowled dismissal cannot credit a fielder."
+        )
+
+    if dismissal_type == "lbw" and has_fielder:
+        raise ValidationError(
+            "LBW dismissal cannot credit a fielder."
+        )
+
+    if dismissal_type == "hit wicket" and has_fielder:
+        raise ValidationError(
+            "Hit wicket dismissal cannot credit a fielder."
+        )
+
+    if dismissal_type == "retired out":
+        if _get_ball_input_value(ball_input, "credited_bowler", "bowler") is not None:
+            raise ValidationError(
+                "Retired out cannot credit a bowler."
+            )
+        if has_fielder:
+            raise ValidationError(
+                "Retired out cannot credit a fielder."
+            )
+
+
+def _validate_incompatible_ballinput_fields(
+    dismissal_type: str,
+    ball_input: BallInput,
+) -> None:
+    """
+    Validate BallInput fields that are incompatible with the dismissal type.
+    """
+
+    if _call_validation_helper(
+        "validate_incompatible_ballinput_fields",
+        dismissal_type,
+        ball_input,
+    ):
+        return
+
+    stumping = bool(
+        _get_ball_input_value(
+            ball_input,
+            "is_stumping",
+            "stumping",
+        )
+    )
+
+    run_out = bool(
+        _get_ball_input_value(
+            ball_input,
+            "is_run_out",
+            "run_out",
+        )
+    )
+
+    if dismissal_type != "stumped" and stumping:
+        raise ValidationError(
+            "Stumping flag supplied for a non-stumped dismissal."
+        )
+
+    if dismissal_type != "run out" and run_out:
+        raise ValidationError(
+            "Run-out flag supplied for a non-run-out dismissal."
+        )
+
+
+def _validate_dispatcher_inputs(
+    dismissal_type: str,
+    ball_input: BallInput,
+) -> None:
+    """
+    Execute every dispatcher-level validation.
+
+    This function centralizes dispatcher validation so the dispatcher itself
+    remains concise while ensuring validation logic is performed exactly once.
+    """
+
+    _validate_supported_dismissal_type(dismissal_type)
+    _validate_required_dismissed_batter(ball_input)
+    _validate_required_credited_bowler(dismissal_type, ball_input)
+    _validate_required_credited_fielder(dismissal_type, ball_input)
+    _validate_impossible_dismissal_combinations(
+        dismissal_type,
+        ball_input,
+    )
+    _validate_incompatible_ballinput_fields(
+        dismissal_type,
+        ball_input,
+    )
+
+
+# ============================================================================
+# Part 5M-3 — Processor Dispatch
+# ============================================================================
+
+from typing import Callable
+
+
+def _get_dispatch_dismissal_type(
+    ball_input: BallInput,
+) -> str:
+    """
+    Obtain the canonical dismissal type for dispatcher execution.
+
+    This helper builds upon the dispatcher helpers introduced in Part 5M-1 and
+    guarantees that a normalized, supported dismissal type is returned.
+
+    Returns
+    -------
+    str
+        Canonical dismissal type.
+
+    Raises
+    ------
+    ValidationError
+        If the dismissal information is incomplete or unsupported.
+    """
+    dismissal_type = _validate_wicket_dispatch_preconditions(
+        state=None,  # type: ignore[arg-type]
+        ball_input=ball_input,
+    )
+
+    _validate_supported_dismissal_type(dismissal_type)
+
+    return dismissal_type
+
+
+def _resolve_wicket_processor(
+    dismissal_type: str,
+) -> Callable[[InningsState, BallInput], WicketOutcome]:
+    """
+    Resolve the wicket processor responsible for the supplied dismissal.
+
+    All processor lookup logic is delegated to ``get_wicket_processor()`` so
+    that a single authoritative registry is used throughout the module.
+
+    Parameters
+    ----------
+    dismissal_type
+        Canonical dismissal type.
+
+    Returns
+    -------
+    Callable[[InningsState, BallInput], WicketOutcome]
+        Registered wicket processor.
+    """
+    processor = get_wicket_processor(dismissal_type)
+
+    return processor
+
+
+def _invoke_wicket_processor(
+    processor: Callable[[InningsState, BallInput], WicketOutcome],
+    state: InningsState,
+    ball_input: BallInput,
+) -> WicketOutcome:
+    """
+    Execute a wicket processor.
+
+    The supplied InningsState is treated as immutable. Any state transition is
+    represented solely by the returned WicketOutcome.
+
+    Parameters
+    ----------
+    processor
+        Registered wicket processor.
+    state
+        Current innings state.
+    ball_input
+        Delivery information.
+
+    Returns
+    -------
+    WicketOutcome
+        Processor result.
+
+    Raises
+    ------
+    ValidationError
+        If the processor returns an invalid result.
+    """
+    outcome = processor(state, ball_input)
+
+    if outcome is None:
+        raise ValidationError(
+            "Wicket processor returned no WicketOutcome."
+        )
+
+    if not isinstance(outcome, WicketOutcome):
+        raise ValidationError(
+            "Wicket processor returned an invalid WicketOutcome."
+        )
+
+    return outcome
+
+
+def _dispatch_wicket_processor(
+    state: InningsState,
+    ball_input: BallInput,
+) -> WicketOutcome:
+    """
+    Dispatch wicket processing to the appropriate registered processor.
+
+    Workflow
+    --------
+    1. Determine the canonical dismissal type.
+    2. Resolve the corresponding processor.
+    3. Invoke the processor.
+    4. Return the resulting WicketOutcome.
+
+    Supported dismissals
+    --------------------
+    - bowled
+    - caught
+    - caught and bowled
+    - lbw
+    - run out
+    - stumped
+    - hit wicket
+    - retired out
+
+    Notes
+    -----
+    This helper performs no InningsState mutation and intentionally contains no
+    processor-specific branching. All routing is delegated to the processor
+    registry created in Part 5L.
+    """
+    dismissal_type = _get_dispatch_dismissal_type(ball_input)
+
+    processor = _resolve_wicket_processor(dismissal_type)
+
+    return _invoke_wicket_processor(
+        processor=processor,
+        state=state,
+        ball_input=ball_input,
+    )
+
+# ============================================================================
+# Part 5M-4 — process_wicket()
+# ============================================================================
+
+def process_wicket(
+    state: InningsState,
+    ball_input: BallInput,
+) -> WicketOutcome | None:
+    """
+    Process a wicket, if one occurred on the supplied delivery.
+
+    Responsibilities
+    ----------------
+    * Determine whether the delivery represents a dismissal.
+    * Return ``None`` when no wicket occurred.
+    * Validate dispatcher preconditions.
+    * Validate dismissal metadata.
+    * Reject unsupported dismissal types.
+    * Reject impossible dismissal combinations.
+    * Dispatch to the appropriate wicket processor.
+    * Return the resulting :class:`WicketOutcome`.
+
+    Notes
+    -----
+    This function is intentionally pure.
+
+    It performs validation and dispatch only. The supplied ``InningsState`` is
+    never modified, statistics are not updated, and no integration with
+    ``apply_delivery()`` occurs here.
+    """
+
+    # No dismissal on this delivery.
+    if not _should_process_wicket(ball_input):
+        return None
+
+    # Validate common dispatcher preconditions and obtain the canonical
+    # dismissal type.
+    dismissal_type = _validate_wicket_dispatch_preconditions(
+        state=state,
+        ball_input=ball_input,
+    )
+
+    # Perform dispatcher-level validation shared by all processors.
+    _validate_dispatcher_inputs(
+        dismissal_type=dismissal_type,
+        ball_input=ball_input,
+    )
+
+    # Dispatch to the registered processor.
+    return _dispatch_wicket_processor(
+        state=state,
+        ball_input=ball_input,
+    )
+
+# ============================================================================
+# Part 5M-5 — Final Cleanup
+# ============================================================================
+
+from typing import Callable, Final, TypeAlias
+
+# ---------------------------------------------------------------------------
+# Dispatcher type aliases
+# ---------------------------------------------------------------------------
+
+#: Canonical wicket processor signature used throughout the dispatcher.
+WicketProcessor: TypeAlias = Callable[
+    [InningsState, BallInput],
+    WicketOutcome,
+]
+
+
+# ---------------------------------------------------------------------------
+# Canonical supported dismissal list
+# ---------------------------------------------------------------------------
+
+#: Canonical dismissal names supported by the dispatcher.
+SUPPORTED_WICKET_DISMISSALS: Final[frozenset[str]] = frozenset(
+    {
+        "bowled",
+        "caught",
+        "caught and bowled",
+        "lbw",
+        "run out",
+        "stumped",
+        "hit wicket",
+        "retired out",
+    }
+)
+
+
+# ---------------------------------------------------------------------------
+# Canonicalization helpers
+# ---------------------------------------------------------------------------
+
+def canonical_dismissal_type(
+    dismissal_type: str,
+) -> str:
+    """
+    Return the canonical dismissal name used throughout the dispatcher.
+
+    The dispatcher accepts several historical spellings for compatibility with
+    earlier project parts while exposing a single normalized value to every
+    downstream component.
+    """
+    normalized = _normalize_dismissal_type(dismissal_type)
+
+    if normalized is None:
+        raise ValidationError("Dismissal type cannot be None.")
+
+    return normalized
+
+
+def is_supported_wicket_dismissal(
+    dismissal_type: str,
+) -> bool:
+    """
+    Return True if the dismissal is implemented by the wicket dispatcher.
+    """
+    return canonical_dismissal_type(
+        dismissal_type
+    ) in SUPPORTED_WICKET_DISMISSALS
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher integration helpers
+# ---------------------------------------------------------------------------
+
+def ball_contains_supported_wicket(
+    ball_input: BallInput,
+) -> bool:
+    """
+    Determine whether a BallInput represents a supported wicket.
+
+    This helper is intended for future apply_delivery() integration so callers
+    can cheaply determine whether wicket processing is required.
+    """
+    if not _should_process_wicket(ball_input):
+        return False
+
+    dismissal_type = _extract_dismissal_type(ball_input)
+
+    return (
+        dismissal_type is not None
+        and is_supported_wicket_dismissal(dismissal_type)
+    )
+
+
+def prepare_wicket_dispatch(
+    state: InningsState,
+    ball_input: BallInput,
+) -> tuple[str, WicketProcessor]:
+    """
+    Prepare everything required for wicket processing.
+
+    This helper centralizes the common preparation performed before processor
+    execution and is intended for reuse by future integrations.
+
+    Returns
+    -------
+    tuple[str, WicketProcessor]
+        Canonical dismissal type together with the resolved processor.
+
+    Notes
+    -----
+    This function performs validation only. No state mutation occurs.
+    """
+    dismissal_type = _validate_wicket_dispatch_preconditions(
+        state=state,
+        ball_input=ball_input,
+    )
+
+    _validate_dispatcher_inputs(
+        dismissal_type,
+        ball_input,
+    )
+
+    processor = _resolve_wicket_processor(dismissal_type)
+
+    return dismissal_type, processor
+
+
+def dispatch_prepared_wicket(
+    processor: WicketProcessor,
+    state: InningsState,
+    ball_input: BallInput,
+) -> WicketOutcome:
+    """
+    Execute a previously prepared wicket processor.
+
+    Separating preparation from execution keeps future integrations concise
+    while ensuring validation occurs exactly once.
+    """
+    return _invoke_wicket_processor(
+        processor=processor,
+        state=state,
+        ball_input=ball_input,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher self-check helper
+# ---------------------------------------------------------------------------
+
+def validate_wicket_dispatcher_configuration() -> None:
+    """
+    Verify that every supported dismissal has a registered processor.
+
+    This helper performs no dispatch and has no side effects. It exists solely
+    to detect registration errors during application startup or testing.
+    """
+    for dismissal_type in sorted(SUPPORTED_WICKET_DISMISSALS):
+        processor = get_wicket_processor(dismissal_type)
+
+        if not callable(processor):
+            raise ValidationError(
+                f"No processor registered for '{dismissal_type}'."
+            )
 
