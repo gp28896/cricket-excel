@@ -2199,3 +2199,844 @@ def is_innings_all_out(
     """
     return wickets_after_delivery >= wickets_per_innings
 
+
+
+# ============================================================================
+# Part 5L-1 - Shared Wicket Processor Utilities
+# ============================================================================
+
+from typing import Optional
+
+
+def _validate_dismissal_info(
+    dismissal: DismissalInfo,
+) -> None:
+    """
+    Validate a DismissalInfo instance before any wicket processor executes.
+
+    This routine intentionally performs only structural validation.
+    Dismissal-specific validation belongs inside the individual processors.
+
+    Raises
+    ------
+    ValueError
+        If mandatory dismissal information is missing.
+    """
+    if dismissal is None:
+        raise ValueError("dismissal information is required")
+
+    if dismissal.dismissal_type is None:
+        raise ValueError("dismissal type is required")
+
+    if dismissal.dismissed_player_id is None:
+        raise ValueError("dismissed player id is required")
+
+
+def _validate_ballinput_for_wicket(
+    ball: BallInput,
+) -> None:
+    """
+    Validate that the supplied BallInput can legally contain
+    wicket information.
+
+    This helper deliberately avoids any dismissal-specific logic.
+    """
+    if ball is None:
+        raise ValueError("BallInput cannot be None")
+
+    if ball.dismissal is None:
+        raise ValueError("BallInput does not contain dismissal information")
+
+
+def _validate_dismissed_batter(
+    state: InningsState,
+    batter_id: str,
+) -> None:
+    """
+    Ensure the dismissed player is one of the two active batters.
+    """
+    if batter_id not in {
+        state.striker_id,
+        state.non_striker_id,
+    }:
+        raise ValueError(
+            "dismissed player must be one of the active batters"
+        )
+
+
+def _validate_bowler_identity(
+    state: InningsState,
+    bowler_id: Optional[str],
+) -> None:
+    """
+    Validate a credited bowler.
+
+    None is permitted because several dismissal types
+    (for example Run Out or Retired Out)
+    legitimately have no credited bowler.
+    """
+    if bowler_id is None:
+        return
+
+    if bowler_id != state.current_bowler_id:
+        raise ValueError(
+            "credited bowler must equal current bowler"
+        )
+
+
+def _validate_fielder_identity(
+    state: InningsState,
+    fielder_id: Optional[str],
+) -> None:
+    """
+    Validate a credited fielder.
+
+    None is allowed for dismissals without a fielder.
+    """
+    if fielder_id is None:
+        return
+
+    batting_team = state.batting_team_id
+
+    if fielder_id in state.team_players.get(batting_team, set()):
+        raise ValueError(
+            "fielder cannot belong to batting side"
+        )
+
+
+def _determine_wicket_increment(
+    dismissal: DismissalInfo,
+) -> int:
+    """
+    Determine how many wickets should be added.
+
+    Current Laws of Cricket award exactly one wicket
+    for every supported dismissal handled by this engine.
+    """
+    return 1
+
+
+def _determine_delivery_legality(
+    ball: BallInput,
+) -> bool:
+    """
+    Determine whether the delivery counts as legal.
+
+    Reuses the shared legality helper created in Part 5K.
+    """
+    return _is_legal_delivery(ball)
+
+
+def _dismissal_description(
+    dismissal_type: DismissalType,
+    batter_name: str,
+    bowler_name: Optional[str] = None,
+    fielder_name: Optional[str] = None,
+) -> str:
+    """
+    Produce the human-readable dismissal description used by
+    scorecards and commentary.
+
+    This helper contains presentation logic only.
+    """
+
+    if dismissal_type == DismissalType.BOWLED:
+        return f"{batter_name} b {bowler_name}"
+
+    if dismissal_type == DismissalType.CAUGHT:
+        return f"{batter_name} c {fielder_name} b {bowler_name}"
+
+    if dismissal_type == DismissalType.CAUGHT_AND_BOWLED:
+        return f"{batter_name} c & b {bowler_name}"
+
+    if dismissal_type == DismissalType.LBW:
+        return f"{batter_name} lbw b {bowler_name}"
+
+    if dismissal_type == DismissalType.RUN_OUT:
+        if fielder_name:
+            return f"{batter_name} run out ({fielder_name})"
+        return f"{batter_name} run out"
+
+    if dismissal_type == DismissalType.STUMPED:
+        return f"{batter_name} st {fielder_name} b {bowler_name}"
+
+    if dismissal_type == DismissalType.HIT_WICKET:
+        return f"{batter_name} hit wicket b {bowler_name}"
+
+    if dismissal_type == DismissalType.RETIRED_OUT:
+        return f"{batter_name} retired out"
+
+    return f"{batter_name} out"
+
+
+def _build_wicket_outcome(
+    *,
+    dismissal_type: DismissalType,
+    dismissed_player_id: str,
+    credited_bowler_id: Optional[str],
+    credited_fielder_id: Optional[str],
+    description: str,
+    legal_delivery: bool,
+    wicket_increment: int,
+    new_batter_required: bool = True,
+) -> WicketOutcome:
+    """
+    Construct an immutable WicketOutcome.
+
+    This helper centralizes construction so every processor
+    produces a consistent object.
+    """
+    return WicketOutcome(
+        dismissal_type=dismissal_type,
+        dismissed_player_id=dismissed_player_id,
+        credited_bowler_id=credited_bowler_id,
+        credited_fielder_id=credited_fielder_id,
+        description=description,
+        wicket_increment=wicket_increment,
+        legal_delivery=legal_delivery,
+        new_batter_required=new_batter_required,
+    )
+
+
+# ============================================================================
+# Part 5L-2 - Bowled / LBW / Hit Wicket Processors
+# ============================================================================
+
+
+def _process_bowled(
+    state: InningsState,
+    ball: BallInput,
+) -> WicketOutcome:
+    """
+    Process a Bowled dismissal.
+
+    A bowled dismissal always:
+
+    * credits the current bowler
+    * has no credited fielder
+    * requires a new batter
+    * increments the wicket count by one
+
+    This function performs validation only and returns an immutable
+    WicketOutcome. It does not modify the innings state.
+    """
+    _validate_ballinput_for_wicket(ball)
+
+    dismissal = ball.dismissal
+    _validate_dismissal_info(dismissal)
+
+    if dismissal.dismissal_type != DismissalType.BOWLED:
+        raise ValueError("expected Bowled dismissal")
+
+    _validate_dismissed_batter(
+        state,
+        dismissal.dismissed_player_id,
+    )
+
+    credited_bowler = state.current_bowler_id
+
+    _validate_bowler_identity(
+        state,
+        credited_bowler,
+    )
+
+    description = _dismissal_description(
+        dismissal_type=DismissalType.BOWLED,
+        batter_name=dismissal.dismissed_player_name,
+        bowler_name=state.current_bowler_name,
+    )
+
+    return _build_wicket_outcome(
+        dismissal_type=DismissalType.BOWLED,
+        dismissed_player_id=dismissal.dismissed_player_id,
+        credited_bowler_id=credited_bowler,
+        credited_fielder_id=None,
+        description=description,
+        legal_delivery=_determine_delivery_legality(ball),
+        wicket_increment=_determine_wicket_increment(dismissal),
+        new_batter_required=True,
+    )
+
+
+def _process_lbw(
+    state: InningsState,
+    ball: BallInput,
+) -> WicketOutcome:
+    """
+    Process an LBW dismissal.
+
+    An LBW dismissal always:
+
+    * credits the current bowler
+    * has no credited fielder
+    * requires a new batter
+    * increments the wicket count by one
+
+    The function is pure and performs no innings mutation.
+    """
+    _validate_ballinput_for_wicket(ball)
+
+    dismissal = ball.dismissal
+    _validate_dismissal_info(dismissal)
+
+    if dismissal.dismissal_type != DismissalType.LBW:
+        raise ValueError("expected LBW dismissal")
+
+    _validate_dismissed_batter(
+        state,
+        dismissal.dismissed_player_id,
+    )
+
+    credited_bowler = state.current_bowler_id
+
+    _validate_bowler_identity(
+        state,
+        credited_bowler,
+    )
+
+    description = _dismissal_description(
+        dismissal_type=DismissalType.LBW,
+        batter_name=dismissal.dismissed_player_name,
+        bowler_name=state.current_bowler_name,
+    )
+
+    return _build_wicket_outcome(
+        dismissal_type=DismissalType.LBW,
+        dismissed_player_id=dismissal.dismissed_player_id,
+        credited_bowler_id=credited_bowler,
+        credited_fielder_id=None,
+        description=description,
+        legal_delivery=_determine_delivery_legality(ball),
+        wicket_increment=_determine_wicket_increment(dismissal),
+        new_batter_required=True,
+    )
+
+
+def _process_hit_wicket(
+    state: InningsState,
+    ball: BallInput,
+) -> WicketOutcome:
+    """
+    Process a Hit Wicket dismissal.
+
+    A hit wicket dismissal:
+
+    * credits the current bowler
+    * has no credited fielder
+    * requires a replacement batter
+    * increments the wicket tally by one
+
+    The processor is completely pure and returns only the generated
+    WicketOutcome.
+    """
+    _validate_ballinput_for_wicket(ball)
+
+    dismissal = ball.dismissal
+    _validate_dismissal_info(dismissal)
+
+    if dismissal.dismissal_type != DismissalType.HIT_WICKET:
+        raise ValueError("expected Hit Wicket dismissal")
+
+    _validate_dismissed_batter(
+        state,
+        dismissal.dismissed_player_id,
+    )
+
+    credited_bowler = state.current_bowler_id
+
+    _validate_bowler_identity(
+        state,
+        credited_bowler,
+    )
+
+    description = _dismissal_description(
+        dismissal_type=DismissalType.HIT_WICKET,
+        batter_name=dismissal.dismissed_player_name,
+        bowler_name=state.current_bowler_name,
+    )
+
+    return _build_wicket_outcome(
+        dismissal_type=DismissalType.HIT_WICKET,
+        dismissed_player_id=dismissal.dismissed_player_id,
+        credited_bowler_id=credited_bowler,
+        credited_fielder_id=None,
+        description=description,
+        legal_delivery=_determine_delivery_legality(ball),
+        wicket_increment=_determine_wicket_increment(dismissal),
+        new_batter_required=True,
+    )
+
+
+# ============================================================================
+# Part 5L-3 - Caught Dismissal Processors
+# ============================================================================
+
+
+def _process_caught(
+    state: InningsState,
+    ball: BallInput,
+) -> WicketOutcome:
+    """
+    Process a Caught dismissal.
+
+    A standard caught dismissal:
+
+    * credits the current bowler
+    * credits the catching fielder
+    * requires a replacement batter
+    * increments the wicket count by one
+
+    This function is pure and performs no mutation of the innings state.
+    """
+    _validate_ballinput_for_wicket(ball)
+
+    dismissal = ball.dismissal
+    _validate_dismissal_info(dismissal)
+
+    if dismissal.dismissal_type != DismissalType.CAUGHT:
+        raise ValueError("expected Caught dismissal")
+
+    _validate_dismissed_batter(
+        state,
+        dismissal.dismissed_player_id,
+    )
+
+    credited_bowler = state.current_bowler_id
+    credited_fielder = dismissal.fielder_id
+
+    if credited_fielder is None:
+        raise ValueError(
+            "caught dismissal requires a credited fielder"
+        )
+
+    _validate_bowler_identity(
+        state,
+        credited_bowler,
+    )
+
+    _validate_fielder_identity(
+        state,
+        credited_fielder,
+    )
+
+    description = _dismissal_description(
+        dismissal_type=DismissalType.CAUGHT,
+        batter_name=dismissal.dismissed_player_name,
+        bowler_name=state.current_bowler_name,
+        fielder_name=dismissal.fielder_name,
+    )
+
+    return _build_wicket_outcome(
+        dismissal_type=DismissalType.CAUGHT,
+        dismissed_player_id=dismissal.dismissed_player_id,
+        credited_bowler_id=credited_bowler,
+        credited_fielder_id=credited_fielder,
+        description=description,
+        legal_delivery=_determine_delivery_legality(ball),
+        wicket_increment=_determine_wicket_increment(dismissal),
+        new_batter_required=True,
+    )
+
+
+def _process_caught_and_bowled(
+    state: InningsState,
+    ball: BallInput,
+) -> WicketOutcome:
+    """
+    Process a Caught and Bowled dismissal.
+
+    In this dismissal the bowler is also the catcher. The same player
+    therefore receives both bowling and fielding credit.
+
+    Characteristics:
+
+    * credited bowler = current bowler
+    * credited fielder = current bowler
+    * new batter required
+    * wicket increment = one
+
+    The function is completely pure and returns an immutable
+    WicketOutcome.
+    """
+    _validate_ballinput_for_wicket(ball)
+
+    dismissal = ball.dismissal
+    _validate_dismissal_info(dismissal)
+
+    if dismissal.dismissal_type != DismissalType.CAUGHT_AND_BOWLED:
+        raise ValueError(
+            "expected Caught and Bowled dismissal"
+        )
+
+    _validate_dismissed_batter(
+        state,
+        dismissal.dismissed_player_id,
+    )
+
+    credited_bowler = state.current_bowler_id
+    credited_fielder = state.current_bowler_id
+
+    _validate_bowler_identity(
+        state,
+        credited_bowler,
+    )
+
+    _validate_fielder_identity(
+        state,
+        credited_fielder,
+    )
+
+    description = _dismissal_description(
+        dismissal_type=DismissalType.CAUGHT_AND_BOWLED,
+        batter_name=dismissal.dismissed_player_name,
+        bowler_name=state.current_bowler_name,
+        fielder_name=state.current_bowler_name,
+    )
+
+    return _build_wicket_outcome(
+        dismissal_type=DismissalType.CAUGHT_AND_BOWLED,
+        dismissed_player_id=dismissal.dismissed_player_id,
+        credited_bowler_id=credited_bowler,
+        credited_fielder_id=credited_fielder,
+        description=description,
+        legal_delivery=_determine_delivery_legality(ball),
+        wicket_increment=_determine_wicket_increment(dismissal),
+        new_batter_required=True,
+    )
+
+
+# ============================================================================
+# Part 5L-4 - Run Out & Stumped Processors
+# ============================================================================
+
+
+def _process_run_out(
+    state: InningsState,
+    ball: BallInput,
+) -> WicketOutcome:
+    """
+    Process a Run Out dismissal.
+
+    A run out differs from most dismissal types because:
+
+    * either the striker or non-striker may be dismissed;
+    * no bowler is credited with the wicket;
+    * a fielder may (or may not) receive fielding credit;
+    * the dismissal may occur from either a legal or illegal delivery;
+    * a replacement batter is always required.
+
+    This function is completely pure and never mutates the innings state.
+    """
+    _validate_ballinput_for_wicket(ball)
+
+    dismissal = ball.dismissal
+    _validate_dismissal_info(dismissal)
+
+    if dismissal.dismissal_type != DismissalType.RUN_OUT:
+        raise ValueError("expected Run Out dismissal")
+
+    _validate_dismissed_batter(
+        state,
+        dismissal.dismissed_player_id,
+    )
+
+    credited_bowler: Optional[str] = None
+    credited_fielder = dismissal.fielder_id
+
+    if credited_fielder is not None:
+        _validate_fielder_identity(
+            state,
+            credited_fielder,
+        )
+
+    description = _dismissal_description(
+        dismissal_type=DismissalType.RUN_OUT,
+        batter_name=dismissal.dismissed_player_name,
+        fielder_name=dismissal.fielder_name,
+    )
+
+    return _build_wicket_outcome(
+        dismissal_type=DismissalType.RUN_OUT,
+        dismissed_player_id=dismissal.dismissed_player_id,
+        credited_bowler_id=credited_bowler,
+        credited_fielder_id=credited_fielder,
+        description=description,
+        legal_delivery=_determine_delivery_legality(ball),
+        wicket_increment=_determine_wicket_increment(dismissal),
+        new_batter_required=True,
+    )
+
+
+def _process_stumped(
+    state: InningsState,
+    ball: BallInput,
+) -> WicketOutcome:
+    """
+    Process a Stumped dismissal.
+
+    Characteristics:
+
+    * only the striker may be dismissed;
+    * the current bowler receives bowling credit;
+    * the wicketkeeper receives fielding credit;
+    * the dismissal is valid only from a legal delivery;
+    * a replacement batter is required.
+
+    The processor performs validation and returns an immutable
+    WicketOutcome without modifying the supplied InningsState.
+    """
+    _validate_ballinput_for_wicket(ball)
+
+    dismissal = ball.dismissal
+    _validate_dismissal_info(dismissal)
+
+    if dismissal.dismissal_type != DismissalType.STUMPED:
+        raise ValueError("expected Stumped dismissal")
+
+    if dismissal.dismissed_player_id != state.striker_id:
+        raise ValueError(
+            "only the striker may be stumped"
+        )
+
+    credited_bowler = state.current_bowler_id
+    credited_fielder = dismissal.fielder_id
+
+    if credited_fielder is None:
+        raise ValueError(
+            "stumped dismissal requires a credited fielder"
+        )
+
+    _validate_bowler_identity(
+        state,
+        credited_bowler,
+    )
+
+    _validate_fielder_identity(
+        state,
+        credited_fielder,
+    )
+
+    legal_delivery = _determine_delivery_legality(ball)
+
+    if not legal_delivery:
+        raise ValueError(
+            "stumped dismissal requires a legal delivery"
+        )
+
+    description = _dismissal_description(
+        dismissal_type=DismissalType.STUMPED,
+        batter_name=dismissal.dismissed_player_name,
+        bowler_name=state.current_bowler_name,
+        fielder_name=dismissal.fielder_name,
+    )
+
+    return _build_wicket_outcome(
+        dismissal_type=DismissalType.STUMPED,
+        dismissed_player_id=dismissal.dismissed_player_id,
+        credited_bowler_id=credited_bowler,
+        credited_fielder_id=credited_fielder,
+        description=description,
+        legal_delivery=legal_delivery,
+        wicket_increment=_determine_wicket_increment(dismissal),
+        new_batter_required=True,
+    )
+
+
+# ============================================================================
+# Part 5L-5 - Retired Out Processor
+# ============================================================================
+
+
+def _process_retired_out(
+    state: InningsState,
+    ball: BallInput,
+) -> WicketOutcome:
+    """
+    Process a Retired Out dismissal.
+
+    A Retired Out dismissal is fundamentally different from all other
+    dismissals because it is not caused by a delivery.
+
+    Characteristics
+    ---------------
+    * Either active batter may retire out.
+    * No bowler is credited.
+    * No fielder is credited.
+    * Counts as one team wicket.
+    * No legal delivery is involved.
+    * A replacement batter is always required.
+
+    This processor is completely pure. It validates the supplied inputs,
+    constructs an immutable WicketOutcome and performs no mutation of the
+    supplied InningsState.
+    """
+    _validate_ballinput_for_wicket(ball)
+
+    dismissal = ball.dismissal
+    _validate_dismissal_info(dismissal)
+
+    if dismissal.dismissal_type != DismissalType.RETIRED_OUT:
+        raise ValueError("expected Retired Out dismissal")
+
+    # The retiring batter must be one of the two currently active batters.
+    _validate_dismissed_batter(
+        state,
+        dismissal.dismissed_player_id,
+    )
+
+    credited_bowler: Optional[str] = None
+    credited_fielder: Optional[str] = None
+
+    description = _dismissal_description(
+        dismissal_type=DismissalType.RETIRED_OUT,
+        batter_name=dismissal.dismissed_player_name,
+    )
+
+    return _build_wicket_outcome(
+        dismissal_type=DismissalType.RETIRED_OUT,
+        dismissed_player_id=dismissal.dismissed_player_id,
+        credited_bowler_id=credited_bowler,
+        credited_fielder_id=credited_fielder,
+        description=description,
+        # Retired Out has no delivery associated with it.
+        legal_delivery=False,
+        wicket_increment=_determine_wicket_increment(dismissal),
+        new_batter_required=True,
+    )
+
+# ============================================================================
+# Part 5L-6 — Wicket Processor Registry
+# ============================================================================
+
+from types import MappingProxyType
+from typing import Callable, Final
+
+#: Type alias for wicket processor functions.
+WicketProcessor = Callable[
+    [InningsState, BallInput],
+    WicketOutcome,
+]
+
+
+#: Immutable registry mapping dismissal types to their processors.
+_WICKET_PROCESSOR_REGISTRY: Final[
+    Mapping[DismissalType, WicketProcessor]
+] = MappingProxyType(
+    {
+        DismissalType.BOWLED: _process_bowled,
+        DismissalType.CAUGHT: _process_caught,
+        DismissalType.CAUGHT_AND_BOWLED: _process_caught_and_bowled,
+        DismissalType.LBW: _process_lbw,
+        DismissalType.RUN_OUT: _process_run_out,
+        DismissalType.STUMPED: _process_stumped,
+        DismissalType.HIT_WICKET: _process_hit_wicket,
+        DismissalType.RETIRED_OUT: _process_retired_out,
+    }
+)
+
+
+def get_wicket_processor(
+    dismissal_type: DismissalType,
+) -> WicketProcessor:
+    """
+    Return the registered processor for a dismissal type.
+
+    Parameters
+    ----------
+    dismissal_type:
+        Type of dismissal being processed.
+
+    Returns
+    -------
+    WicketProcessor
+        Callable responsible for producing the corresponding
+        ``WicketOutcome``.
+
+    Raises
+    ------
+    ValidationError
+        If the dismissal type is unsupported or has no registered
+        processor.
+    """
+    processor = _WICKET_PROCESSOR_REGISTRY.get(dismissal_type)
+    if processor is None:
+        raise ValidationError(
+            f"Unsupported dismissal type: {dismissal_type!r}"
+        )
+    return processor
+
+
+# ============================================================================
+# Part 5L-7 — Wicket Processor Framework Finalization
+# ============================================================================
+
+from typing import Final, Iterable
+
+
+#: Public export surface for the wicket-processing subsystem.
+__all__: Final[tuple[str, ...]] = (
+    "WicketProcessor",
+    "get_wicket_processor",
+)
+
+
+def is_supported_dismissal(
+    dismissal_type: DismissalType,
+) -> bool:
+    """
+    Return whether a dismissal type has a registered processor.
+
+    This helper performs no validation and is intended for callers that
+    need a lightweight capability check before dispatch.
+    """
+    return dismissal_type in _WICKET_PROCESSOR_REGISTRY
+
+
+def iter_supported_dismissals() -> tuple[DismissalType, ...]:
+    """
+    Return all supported dismissal types.
+
+    A tuple is returned to preserve immutability while providing a stable
+    iteration order for diagnostics, validation, and future integration.
+    """
+    return tuple(_WICKET_PROCESSOR_REGISTRY.keys())
+
+
+def iter_wicket_processors() -> tuple[WicketProcessor, ...]:
+    """
+    Return all registered wicket processors.
+
+    The returned tuple is immutable and may be used for inspection,
+    testing, or framework initialization without exposing the underlying
+    registry.
+    """
+    return tuple(_WICKET_PROCESSOR_REGISTRY.values())
+
+
+def validate_dismissal_processor(
+    dismissal_type: DismissalType,
+) -> None:
+    """
+    Validate that a processor exists for the supplied dismissal type.
+
+    This centralizes registry validation so later integration code
+    (Part 5M) does not duplicate dispatch checks.
+    """
+    get_wicket_processor(dismissal_type)
+
+
+def dispatch_wicket_processor(
+    dismissal_info: DismissalInfo,
+) -> WicketProcessor:
+    """
+    Resolve the processor for a dismissal.
+
+    This helper intentionally performs only processor resolution.
+    It does not invoke the processor, mutate state, or inspect any
+    additional match information, keeping the processor framework pure
+    and preparing a single dispatch entry point for Part 5M.
+    """
+    return get_wicket_processor(dismissal_info.dismissal_type)
+
+
+
