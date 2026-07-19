@@ -1,0 +1,1469 @@
+"""
+score_ball.py
+=============
+
+Part 1 — Module Foundation
+
+This module defines the immutable data model and configuration used by the
+ball-by-ball scoring engine for the Cricket Tournament Manager.
+
+Only foundational structures are defined here:
+
+    • Module imports
+    • Type aliases
+    • Enumerations
+    • Frozen dataclasses
+    • Public configuration objects
+
+No scoring logic is implemented in this part.
+
+Future parts will implement:
+
+    • Delivery validation
+    • Ball processing
+    • Strike rotation
+    • Over completion
+    • Innings completion
+    • Match completion
+    • Workbook synchronization
+    • Scorecard generation
+    • Leaderboard updates
+
+Dependencies
+------------
+Uses:
+    - constants.py
+    - formulas.py
+
+Does NOT import:
+    - openpyxl
+    - workbook.py
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum, IntEnum, auto
+from typing import Any, Mapping, Optional, TypeAlias
+
+import constants
+import formulas
+
+
+# =============================================================================
+# Type Aliases
+# =============================================================================
+
+PlayerId: TypeAlias = str
+TeamId: TypeAlias = str
+OverNumber: TypeAlias = int
+BallNumber: TypeAlias = int
+Runs: TypeAlias = int
+Wickets: TypeAlias = int
+Extras: TypeAlias = int
+
+Metadata: TypeAlias = Mapping[str, Any]
+
+
+# =============================================================================
+# Enumerations
+# =============================================================================
+
+
+class BallType(Enum):
+    """Classification of a delivery."""
+
+    LEGAL = auto()
+    NO_BALL = auto()
+    WIDE = auto()
+    DEAD_BALL = auto()
+
+
+class ExtraType(Enum):
+    """Type of extra awarded."""
+
+    NONE = auto()
+    BYE = auto()
+    LEG_BYE = auto()
+    NO_BALL = auto()
+    WIDE = auto()
+    PENALTY = auto()
+
+
+class WicketType(Enum):
+    """Dismissal method."""
+
+    NONE = auto()
+    BOWLED = auto()
+    CAUGHT = auto()
+    LBW = auto()
+    RUN_OUT = auto()
+    STUMPED = auto()
+    HIT_WICKET = auto()
+    RETIRED_OUT = auto()
+    TIMED_OUT = auto()
+    OBSTRUCTING_FIELD = auto()
+    HIT_BALL_TWICE = auto()
+
+
+class InningsStatus(Enum):
+    """Current innings state."""
+
+    NOT_STARTED = auto()
+    IN_PROGRESS = auto()
+    COMPLETED = auto()
+
+
+class MatchPhase(Enum):
+    """Current match phase."""
+
+    PRE_MATCH = auto()
+    FIRST_INNINGS = auto()
+    INTERVAL = auto()
+    SECOND_INNINGS = auto()
+    MATCH_COMPLETE = auto()
+
+
+class BallOutcome(IntEnum):
+    """High-level scoring outcome."""
+
+    NORMAL = 0
+    EXTRA = 1
+    WICKET = 2
+    EXTRA_AND_WICKET = 3
+
+
+# =============================================================================
+# Frozen Dataclasses
+# =============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class BallInput:
+    """
+    Immutable representation of one delivery before processing.
+    """
+
+    innings: int
+    over: OverNumber
+    ball: BallNumber
+
+    striker: PlayerId
+    non_striker: PlayerId
+    bowler: PlayerId
+
+    batting_team: TeamId
+    bowling_team: TeamId
+
+    runs_off_bat: Runs = 0
+    extra_runs: Extras = 0
+
+    ball_type: BallType = BallType.LEGAL
+    extra_type: ExtraType = ExtraType.NONE
+    wicket_type: WicketType = WicketType.NONE
+
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class BallResult:
+    """
+    Immutable processed result of one delivery.
+
+    Later parts will populate these fields after validation.
+    """
+
+    legal_delivery: bool
+
+    total_runs: Runs
+
+    batter_runs: Runs
+
+    extras: Extras
+
+    wickets: Wickets
+
+    outcome: BallOutcome
+
+    commentary: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class BatterState:
+    """
+    Snapshot of batter state.
+    """
+
+    player: PlayerId
+
+    runs: Runs = 0
+
+    balls: int = 0
+
+    fours: int = 0
+
+    sixes: int = 0
+
+    on_strike: bool = False
+
+    dismissed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class BowlerState:
+    """
+    Snapshot of bowler statistics.
+    """
+
+    player: PlayerId
+
+    legal_balls: int = 0
+
+    maidens: int = 0
+
+    runs_conceded: Runs = 0
+
+    wickets: Wickets = 0
+
+
+@dataclass(frozen=True, slots=True)
+class InningsState:
+    """
+    Immutable snapshot of innings state.
+
+    This object represents the score before or after a delivery.
+    """
+
+    innings_number: int
+
+    batting_team: TeamId
+
+    bowling_team: TeamId
+
+    status: InningsStatus
+
+    total_runs: Runs = 0
+
+    wickets: Wickets = 0
+
+    legal_balls: int = 0
+
+    striker: Optional[BatterState] = None
+
+    non_striker: Optional[BatterState] = None
+
+    bowler: Optional[BowlerState] = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScoreEvent:
+    """
+    Scoring event generated by one delivery.
+    """
+
+    batter_runs: Runs
+
+    extras: Extras
+
+    total_runs: Runs
+
+    legal_delivery: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WicketEvent:
+    """
+    Wicket information generated by a delivery.
+    """
+
+    wicket_type: WicketType
+
+    player_out: Optional[PlayerId]
+
+    credited_to_bowler: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ExtraEvent:
+    """
+    Extra information awarded on a delivery.
+    """
+
+    extra_type: ExtraType
+
+    runs: Extras
+
+    counts_as_ball: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ScoreEngineConfig:
+    """
+    Immutable scoring engine configuration.
+
+    Values default to tournament constants where available.
+    """
+
+    balls_per_over: int = getattr(constants, "BALLS_PER_OVER", 6)
+
+    maximum_wickets: int = getattr(constants, "MAX_WICKETS", 10)
+
+    enable_super_over: bool = getattr(constants, "ENABLE_SUPER_OVER", False)
+
+    allow_retired_hurt_return: bool = True
+
+    formulas_module: Any = formulas
+
+# =============================================================================
+# Validation Helpers
+# =============================================================================
+
+def validate_runs(runs: int) -> None:
+    """
+    Validate runs scored from the bat.
+
+    Raises
+    ------
+    ValueError
+        If the supplied run value is invalid.
+    """
+    if not isinstance(runs, int):
+        raise TypeError("Runs must be an integer.")
+
+    if runs < 0:
+        raise ValueError("Runs cannot be negative.")
+
+    max_runs = getattr(constants, "MAX_RUNS_OFF_BAT", 6)
+    if runs > max_runs:
+        raise ValueError(
+            f"Runs cannot exceed {max_runs}."
+        )
+
+
+def validate_extra_type(extra_type: ExtraType) -> None:
+    """
+    Validate an extra type.
+    """
+    if not isinstance(extra_type, ExtraType):
+        raise TypeError("Invalid ExtraType.")
+
+    allowed = getattr(constants, "EXTRA_TYPES", None)
+
+    if allowed is not None:
+        if extra_type.name not in allowed and extra_type.value not in allowed:
+            raise ValueError(
+                f"Unsupported extra type: {extra_type.name}"
+            )
+
+
+def validate_dismissal_type(dismissal: WicketType) -> None:
+    """
+    Validate dismissal type.
+    """
+    if not isinstance(dismissal, WicketType):
+        raise TypeError("Invalid WicketType.")
+
+    allowed = getattr(constants, "DISMISSAL_TYPES", None)
+
+    if allowed is not None:
+        if dismissal.name not in allowed and dismissal.value not in allowed:
+            raise ValueError(
+                f"Unsupported dismissal type: {dismissal.name}"
+            )
+
+
+def validate_ball_number(over: int, ball: int) -> None:
+    """
+    Validate over and ball numbering.
+    """
+    if over < 0:
+        raise ValueError("Over number cannot be negative.")
+
+    if ball < 1:
+        raise ValueError("Ball number must be at least 1.")
+
+    balls_per_over = getattr(constants, "BALLS_PER_OVER", 6)
+
+    # Illegal deliveries (wide/no-ball) may temporarily exceed the legal
+    # ball count, therefore allow one additional delivery by default.
+    max_ball = balls_per_over + 1
+
+    if ball > max_ball:
+        raise ValueError(
+            f"Ball number cannot exceed {max_ball}."
+        )
+
+
+def validate_batter_bowler(
+    striker: PlayerId,
+    non_striker: PlayerId,
+    bowler: PlayerId,
+) -> None:
+    """
+    Validate participating players.
+    """
+    if not striker:
+        raise ValueError("Striker is required.")
+
+    if not non_striker:
+        raise ValueError("Non-striker is required.")
+
+    if not bowler:
+        raise ValueError("Bowler is required.")
+
+    if striker == non_striker:
+        raise ValueError(
+            "Striker and non-striker cannot be the same player."
+        )
+
+    if striker == bowler:
+        raise ValueError(
+            "Bowler cannot be the striker."
+        )
+
+    if non_striker == bowler:
+        raise ValueError(
+            "Bowler cannot be the non-striker."
+        )
+
+
+def validate_innings_state(state: InningsState) -> None:
+    """
+    Validate an innings snapshot.
+    """
+    if state.total_runs < 0:
+        raise ValueError("Total runs cannot be negative.")
+
+    if state.wickets < 0:
+        raise ValueError("Wickets cannot be negative.")
+
+    max_wickets = getattr(constants, "MAX_WICKETS", 10)
+
+    if state.wickets > max_wickets:
+        raise ValueError(
+            f"Wickets cannot exceed {max_wickets}."
+        )
+
+    if state.legal_balls < 0:
+        raise ValueError("Legal ball count cannot be negative.")
+
+    if (
+        state.striker is not None
+        and state.non_striker is not None
+        and state.striker.player == state.non_striker.player
+    ):
+        raise ValueError(
+            "Striker and non-striker cannot reference the same batter."
+        )
+
+
+def validate_delivery_input(ball: BallInput) -> None:
+    """
+    Perform complete validation of a delivery before scoring.
+    """
+    validate_runs(ball.runs_off_bat)
+
+    validate_extra_type(ball.extra_type)
+
+    validate_dismissal_type(ball.wicket_type)
+
+    validate_ball_number(ball.over, ball.ball)
+
+    validate_batter_bowler(
+        ball.striker,
+        ball.non_striker,
+        ball.bowler,
+    )
+
+    if ball.extra_runs < 0:
+        raise ValueError("Extra runs cannot be negative.")
+
+    legal = set(getattr(constants, "LEGAL_DELIVERIES", {"LEGAL"}))
+    illegal = set(getattr(constants, "ILLEGAL_DELIVERIES", {"NO_BALL", "WIDE"}))
+
+    if ball.ball_type.name not in legal.union(illegal):
+        raise ValueError(
+            f"Unsupported ball type: {ball.ball_type.name}"
+        )
+
+    if (
+        ball.ball_type is BallType.LEGAL
+        and ball.extra_type in (ExtraType.NO_BALL, ExtraType.WIDE)
+    ):
+        raise ValueError(
+            "NO_BALL or WIDE extras require a corresponding illegal delivery."
+        )
+
+    if (
+        ball.ball_type in (BallType.NO_BALL, BallType.WIDE)
+        and ball.extra_type is ExtraType.NONE
+    ):
+        raise ValueError(
+            "Illegal deliveries must specify an appropriate extra type."
+        )
+
+# =============================================================================
+# Delivery Classification Helpers
+# =============================================================================
+
+def is_legal_ball(ball: BallInput) -> bool:
+    """
+    Return True if the delivery counts as a legal ball.
+
+    Legal deliveries increment the legal ball count for the over.
+    """
+    legal = set(getattr(constants, "LEGAL_DELIVERIES", {"LEGAL"}))
+    return ball.ball_type.name in legal
+
+
+def is_wide(ball: BallInput) -> bool:
+    """
+    Return True if the delivery is a wide.
+    """
+    return (
+        ball.ball_type is BallType.WIDE
+        or ball.extra_type is ExtraType.WIDE
+    )
+
+
+def is_no_ball(ball: BallInput) -> bool:
+    """
+    Return True if the delivery is a no-ball.
+    """
+    return (
+        ball.ball_type is BallType.NO_BALL
+        or ball.extra_type is ExtraType.NO_BALL
+    )
+
+
+def is_bye(ball: BallInput) -> bool:
+    """
+    Return True if the delivery resulted in byes.
+    """
+    return ball.extra_type is ExtraType.BYE
+
+
+def is_leg_bye(ball: BallInput) -> bool:
+    """
+    Return True if the delivery resulted in leg byes.
+    """
+    return ball.extra_type is ExtraType.LEG_BYE
+
+
+def is_bowling_extra(ball: BallInput) -> bool:
+    """
+    Return True if the extra is charged to the bowler.
+
+    Bowling extras:
+        • Wide
+        • No-ball
+    """
+    return is_wide(ball) or is_no_ball(ball)
+
+
+def is_fielding_extra(ball: BallInput) -> bool:
+    """
+    Return True if the extra originates from fielding
+    rather than bowling.
+
+    Fielding extras:
+        • Bye
+        • Leg bye
+    """
+    return is_bye(ball) or is_leg_bye(ball)
+
+
+def counts_for_batter(ball: BallInput) -> bool:
+    """
+    Return True if runs from this delivery are credited
+    to the batter.
+
+    Runs are *not* credited for:
+        • Byes
+        • Leg byes
+    """
+    return not (is_bye(ball) or is_leg_bye(ball))
+
+
+def counts_for_bowler(ball: BallInput) -> bool:
+    """
+    Return True if runs are charged against the bowler.
+
+    Charged to bowler:
+        • Runs off the bat
+        • Wides
+        • No-balls
+
+    Not charged:
+        • Byes
+        • Leg byes
+    """
+    return not is_fielding_extra(ball)
+
+
+def counts_for_team(ball: BallInput) -> bool:
+    """
+    Every valid scoring event contributes to the team total.
+
+    Dead-ball handling is introduced in later parts.
+    """
+    return ball.ball_type is not BallType.DEAD_BALL
+
+
+def counts_as_wicket(ball: BallInput) -> bool:
+    """
+    Return True if a wicket fell on the delivery.
+    """
+    return ball.wicket_type is not WicketType.NONE
+
+
+def bowler_gets_wicket(ball: BallInput) -> bool:
+    """
+    Return True if the wicket is credited to the bowler.
+
+    Bowler credited:
+        • Bowled
+        • Caught
+        • LBW
+        • Stumped
+        • Hit wicket
+
+    Not credited:
+        • Run out
+        • Retired out
+        • Timed out
+        • Obstructing the field
+        • Hit ball twice
+    """
+    return ball.wicket_type in {
+        WicketType.BOWLED,
+        WicketType.CAUGHT,
+        WicketType.LBW,
+        WicketType.STUMPED,
+        WicketType.HIT_WICKET,
+    }
+
+
+# =============================================================================
+# Score Calculation Helpers
+# =============================================================================
+
+def calculate_delivery_runs(ball: BallInput) -> Runs:
+    """
+    Calculate the total team runs scored from a delivery.
+
+    Total runs =
+        batter runs
+        + extras
+
+    Dead balls contribute no runs unless future Laws/tournament rules specify
+    otherwise.
+    """
+    if ball.ball_type is BallType.DEAD_BALL:
+        return 0
+
+    return calculate_batter_runs(ball) + calculate_extras(ball)
+
+
+def calculate_batter_runs(ball: BallInput) -> Runs:
+    """
+    Calculate runs credited to the batter.
+
+    Batter runs are not awarded for:
+        * Byes
+        * Leg byes
+
+    Runs from no-balls (off the bat) are still credited to the batter.
+    """
+    if not counts_for_batter(ball):
+        return 0
+
+    return ball.runs_off_bat
+
+
+def calculate_bowler_runs_conceded(ball: BallInput) -> Runs:
+    """
+    Calculate runs charged to the bowler.
+
+    Charged:
+        * Runs scored from the bat
+        * Wides
+        * No-ball penalties
+
+    Not charged:
+        * Byes
+        * Leg byes
+    """
+    if not counts_for_bowler(ball):
+        return 0
+
+    runs = ball.runs_off_bat
+
+    if is_bowling_extra(ball):
+        runs += ball.extra_runs
+
+    return runs
+
+
+def calculate_extras(ball: BallInput) -> Extras:
+    """
+    Calculate extras awarded to the batting side.
+
+    This value is added to the team score but may or may not be charged
+    to the bowler depending on the type of extra.
+    """
+    return ball.extra_runs
+
+
+def calculate_legal_ball_increment(ball: BallInput) -> int:
+    """
+    Return the increment for the legal ball counter.
+
+    Returns
+    -------
+    int
+        1 for legal deliveries, otherwise 0.
+    """
+    return 1 if is_legal_ball(ball) else 0
+
+
+def calculate_next_over_ball(
+    current_over: int,
+    current_ball: int,
+    *,
+    legal_increment: int,
+) -> tuple[int, int]:
+    """
+    Calculate the next over/ball position after processing a delivery.
+
+    Parameters
+    ----------
+    current_over:
+        Zero-based over number.
+
+    current_ball:
+        Current legal ball number within the over (1..balls_per_over).
+
+    legal_increment:
+        Value returned by ``calculate_legal_ball_increment()``.
+
+    Returns
+    -------
+    tuple[int, int]
+        (next_over, next_ball)
+
+    Notes
+    -----
+    Illegal deliveries do not advance the legal ball count.
+    """
+    balls_per_over = getattr(constants, "BALLS_PER_OVER", 6)
+
+    if legal_increment == 0:
+        return current_over, current_ball
+
+    next_ball = current_ball + 1
+    next_over = current_over
+
+    if next_ball > balls_per_over:
+        next_over += 1
+        next_ball = 1
+
+    return next_over, next_ball
+
+
+def calculate_required_after_delivery(
+    target: Optional[int],
+    current_score: int,
+) -> Optional[int]:
+    """
+    Calculate runs still required after a completed delivery.
+
+    Parameters
+    ----------
+    target:
+        Target score (not runs-to-win). If None, returns None.
+
+    current_score:
+        Team score after the delivery.
+
+    Returns
+    -------
+    Optional[int]
+        Runs still required to win.
+
+        Returns 0 once the target has been achieved.
+    """
+    if target is None:
+        return None
+
+    required = target - current_score
+
+    return max(required, 0)
+
+    # ------------------------------------------------------------------
+    # Delivery calculations
+    # ------------------------------------------------------------------
+
+    team_runs = calculate_delivery_runs(ball_input)
+
+    batter_runs = calculate_batter_runs(ball_input)
+
+    bowler_runs_conceded = calculate_bowler_runs_conceded(ball_input)
+
+    extras = calculate_extras(ball_input)
+
+    legal_ball_increment = calculate_legal_ball_increment(ball_input)
+
+    legal_ball = bool(legal_ball_increment)
+
+    boundary_four = batter_runs == 4
+
+    boundary_six = batter_runs == 6
+
+    dismissal = ball_input.dismissal
+
+    wicket_fell = dismissal is not None
+
+    if wicket_fell:
+        dismissed_player = striker
+
+    # ------------------------------------------------------------------
+    # Populate BallResult
+    # ------------------------------------------------------------------
+
+    result.team_runs = team_runs
+    result.batter_runs = batter_runs
+    result.extras = extras
+    result.bowler_runs = bowler_runs_conceded
+
+    result.legal_delivery = legal_ball
+    result.legal_ball = legal_ball
+    result.legal_ball_increment = legal_ball_increment
+
+    result.boundary_four = boundary_four
+    result.boundary_six = boundary_six
+
+    result.dismissal = dismissal
+    result.wicket = wicket_fell
+    result.dismissed_player = dismissed_player
+
+    result.extra_type = ball_input.extra_type
+    result.extra_runs = extras
+
+    result.ball_input = ball_input
+
+
+    # ------------------------------------------------------------------
+    # Batter statistics
+    # ------------------------------------------------------------------
+
+    # Credit batter runs.
+    #
+    # calculate_batter_runs() already accounts for:
+    #   * wides            -> 0
+    #   * byes             -> 0
+    #   * leg byes         -> 0
+    #   * no-ball scoring  -> batter receives only the bat component
+    #
+    striker.runs += batter_runs
+
+    # Only legal deliveries count as a batter ball faced.
+    if legal_ball:
+        striker.balls += 1
+
+    # Boundary tracking.
+    if boundary_four:
+        striker.fours += 1
+
+    if boundary_six:
+        striker.sixes += 1
+
+    # Maintain strike rate if the model stores it.
+    if hasattr(striker, "strike_rate"):
+        if striker.balls > 0:
+            striker.strike_rate = (
+                striker.runs * 100.0
+            ) / striker.balls
+        else:
+            striker.strike_rate = 0.0
+
+    # Record dismissal status.
+    if wicket_fell and dismissed_player is striker:
+        if hasattr(striker, "dismissed"):
+            striker.dismissed = True
+
+        if hasattr(striker, "is_out"):
+            striker.is_out = True
+
+        if hasattr(striker, "dismissal"):
+            striker.dismissal = dismissal
+
+        if hasattr(striker, "dismissal_type"):
+            striker.dismissal_type = dismissal
+
+        if hasattr(striker, "how_out"):
+            striker.how_out = dismissal
+
+
+    # ------------------------------------------------------------------
+    # Bowler statistics
+    # ------------------------------------------------------------------
+
+    # Only legal deliveries count towards the bowler's ball count.
+    if legal_ball:
+        bowler.balls += 1
+
+    # Runs conceded are determined by calculate_bowler_runs_conceded(),
+    # which correctly excludes byes and leg byes while including:
+    #   * batter runs
+    #   * wides
+    #   * no-ball penalties
+    bowler.runs_conceded += bowler_runs_conceded
+
+    # Prepare maiden-over tracking.
+    #
+    # Actual maiden determination is deferred until over completion,
+    # where the total runs conceded in the completed over are known.
+    if hasattr(bowler, "_current_over_runs"):
+        bowler._current_over_runs += bowler_runs_conceded
+
+    if hasattr(bowler, "_current_over_legal_balls") and legal_ball:
+        bowler._current_over_legal_balls += 1
+
+    # Credit wickets only for dismissals attributable to the bowler.
+    if wicket_fell:
+        bowler_credit = True
+
+        # Common dismissal types that do NOT count as a bowler wicket.
+        if dismissal in {
+            DismissalType.RUN_OUT,
+            DismissalType.RETIRED_OUT,
+            DismissalType.RETIRED_HURT,
+            DismissalType.OBSTRUCTING_THE_FIELD,
+            DismissalType.TIMED_OUT,
+            DismissalType.HIT_THE_BALL_TWICE,
+        }:
+            bowler_credit = False
+
+        if bowler_credit:
+            bowler.wickets += 1
+
+
+    # ------------------------------------------------------------------
+    # Team score and extras
+    # ------------------------------------------------------------------
+
+    # Innings totals.
+    innings.total_runs += team_runs
+
+    if wicket_fell:
+        innings.wickets += 1
+
+    # Legal delivery count.
+    innings.legal_balls += legal_ball_increment
+
+    # Maintain over-level running total if present.
+    if hasattr(innings, "current_over_runs"):
+        innings.current_over_runs += team_runs
+
+    # ------------------------------------------------------------------
+    # Extras breakdown
+    # ------------------------------------------------------------------
+
+    if ball_input.extra_type == ExtraType.WIDE:
+        innings.wides += extras
+
+    elif ball_input.extra_type == ExtraType.NO_BALL:
+        innings.no_balls += extras
+
+    elif ball_input.extra_type == ExtraType.BYE:
+        innings.byes += extras
+
+    elif ball_input.extra_type == ExtraType.LEG_BYE:
+        innings.leg_byes += extras
+
+    # Aggregate innings extras.
+    if hasattr(innings, "extras"):
+        innings.extras += extras
+
+    # Batting team aggregates.
+    if hasattr(batting_team, "runs"):
+        batting_team.runs += team_runs
+
+    if hasattr(batting_team, "wickets"):
+        batting_team.wickets = innings.wickets
+
+    if hasattr(batting_team, "extras"):
+        batting_team.extras += extras
+
+    if hasattr(batting_team, "byes"):
+        batting_team.byes = getattr(innings, "byes", 0)
+
+    if hasattr(batting_team, "leg_byes"):
+        batting_team.leg_byes = getattr(innings, "leg_byes", 0)
+
+    if hasattr(batting_team, "wides"):
+        batting_team.wides = getattr(innings, "wides", 0)
+
+    if hasattr(batting_team, "no_balls"):
+        batting_team.no_balls = getattr(innings, "no_balls", 0)
+
+    # Bowling team aggregates.
+    if hasattr(bowling_team, "runs_conceded"):
+        bowling_team.runs_conceded += team_runs
+
+    if hasattr(bowling_team, "extras_conceded"):
+        bowling_team.extras_conceded += extras
+
+    if hasattr(bowling_team, "wides"):
+        bowling_team.wides = getattr(innings, "wides", 0)
+
+    if hasattr(bowling_team, "no_balls"):
+        bowling_team.no_balls = getattr(innings, "no_balls", 0)
+
+    # ------------------------------------------------------------------
+    # Populate BallResult cumulative fields
+    # ------------------------------------------------------------------
+
+    result.innings_runs = innings.total_runs
+    result.innings_wickets = innings.wickets
+    result.innings_extras = getattr(innings, "extras", extras)
+
+    result.total_runs = innings.total_runs
+    result.total_wickets = innings.wickets
+
+    result.wides = getattr(innings, "wides", 0)
+    result.no_balls = getattr(innings, "no_balls", 0)
+    result.byes = getattr(innings, "byes", 0)
+    result.leg_byes = getattr(innings, "leg_byes", 0)
+
+    result.current_over_runs = getattr(
+        innings,
+        "current_over_runs",
+        None,
+    )
+
+
+    # ------------------------------------------------------------------
+    # Strike rotation
+    # ------------------------------------------------------------------
+
+    rotate_strike = False
+
+    # Batter runs.
+    if batter_runs % 2 == 1:
+        rotate_strike = not rotate_strike
+
+    # Byes / Leg-byes.
+    #
+    # The physical running between the wickets determines strike for these
+    # deliveries, even though the runs are not credited to the batter.
+    if ball_input.extra_type in (
+        ExtraType.BYE,
+        ExtraType.LEG_BYE,
+    ):
+        if extras % 2 == 1:
+            rotate_strike = not rotate_strike
+
+    # Swap batters immediately if required after the delivery.
+    if rotate_strike:
+        new_striker, new_non_striker = (
+            new_non_striker,
+            new_striker,
+        )
+
+    # Completed over.
+    #
+    # After six legal deliveries the strike changes once more before the
+    # next over begins.
+    over_completed = (
+        legal_ball
+        and innings.legal_balls > 0
+        and innings.legal_balls % BALLS_PER_OVER == 0
+    )
+
+    if over_completed:
+        new_striker, new_non_striker = (
+            new_non_striker,
+            new_striker,
+        )
+
+    # Wicket handling.
+    #
+    # Actual incoming batter selection is performed by the batting-order
+    # logic in a later stage. Here we only preserve the existing references
+    # until the replacement batter is supplied.
+    if wicket_fell:
+        if dismissed_player is striker:
+            new_striker = striker
+        elif dismissed_player is non_striker:
+            new_non_striker = non_striker
+
+    # Preserve updated batting references.
+    striker = new_striker
+    non_striker = new_non_striker
+
+    # Record transition information.
+    result.rotate_strike = rotate_strike
+    result.over_completed = over_completed
+    result.striker = striker
+    result.non_striker = non_striker
+
+
+    # ------------------------------------------------------------------
+    # Over progression
+    # ------------------------------------------------------------------
+
+    # Only legal deliveries advance the over.
+    if legal_ball:
+        completed_overs = innings.legal_balls // BALLS_PER_OVER
+        balls_into_over = innings.legal_balls % BALLS_PER_OVER
+    else:
+        # Wides and no-balls do not advance the legal delivery count.
+        completed_overs = getattr(
+            innings,
+            "completed_overs",
+            innings.legal_balls // BALLS_PER_OVER,
+        )
+        balls_into_over = innings.legal_balls % BALLS_PER_OVER
+
+    # Maintain completed overs if tracked explicitly.
+    if hasattr(innings, "completed_overs"):
+        innings.completed_overs = completed_overs
+
+    # Balls remaining in the current over.
+    balls_remaining = BALLS_PER_OVER - balls_into_over
+    if balls_remaining == BALLS_PER_OVER:
+        balls_remaining = 0
+
+    if hasattr(innings, "balls_remaining_in_over"):
+        innings.balls_remaining_in_over = balls_remaining
+
+    # Current over notation (e.g. 12.3).
+    current_over = f"{completed_overs}.{balls_into_over}"
+
+    if hasattr(innings, "current_over"):
+        innings.current_over = current_over
+
+    if hasattr(innings, "over_notation"):
+        innings.over_notation = current_over
+
+    # End-of-over processing.
+    #
+    # Wides and no-balls never complete an over because they are not legal
+    # deliveries.
+    if legal_ball and balls_into_over == 0:
+        over_completed = True
+
+        # The strike changes at the end of every completed over.
+        striker, non_striker = non_striker, striker
+
+        # Reset running over total if maintained.
+        if hasattr(innings, "current_over_runs"):
+            innings.current_over_runs = 0
+
+        # Maiden-over determination will be finalized in a later part.
+    else:
+        over_completed = False
+
+    # ------------------------------------------------------------------
+    # BallResult over information
+    # ------------------------------------------------------------------
+
+    result.legal_balls = innings.legal_balls
+    result.completed_overs = completed_overs
+    result.balls_into_over = balls_into_over
+    result.balls_remaining = balls_remaining
+    result.current_over = current_over
+    result.over_completed = over_completed
+
+
+    # ------------------------------------------------------------------
+    # Wicket handling
+    # ------------------------------------------------------------------
+
+    if wicket_fell:
+        # Ensure innings wicket tally is synchronized.
+        innings.wickets = max(innings.wickets, 1)
+
+        # Mark dismissal on the outgoing batter.
+        if dismissed_player is not None:
+            if hasattr(dismissed_player, "dismissed"):
+                dismissed_player.dismissed = True
+
+            if hasattr(dismissed_player, "is_out"):
+                dismissed_player.is_out = True
+
+            if hasattr(dismissed_player, "dismissal"):
+                dismissed_player.dismissal = dismissal
+
+            if hasattr(dismissed_player, "dismissal_type"):
+                dismissed_player.dismissal_type = dismissal
+
+            if hasattr(dismissed_player, "how_out"):
+                dismissed_player.how_out = dismissal
+
+            if hasattr(dismissed_player, "bowler"):
+                dismissed_player.bowler = bowler
+
+        # Determine whether the wicket is credited to the bowler.
+        bowler_gets_wicket = dismissal in {
+            DismissalType.BOWLED,
+            DismissalType.CAUGHT,
+            DismissalType.LBW,
+            DismissalType.STUMPED,
+            DismissalType.HIT_WICKET,
+        }
+
+        # Handled the ball (if supported by the Laws version used).
+        if hasattr(DismissalType, "HANDLED_THE_BALL"):
+            if dismissal == DismissalType.HANDLED_THE_BALL:
+                bowler_gets_wicket = False
+
+        # Non-bowler dismissals.
+        if dismissal in {
+            DismissalType.RUN_OUT,
+            DismissalType.OBSTRUCTING_THE_FIELD,
+            DismissalType.RETIRED_OUT,
+        }:
+            bowler_gets_wicket = False
+
+        # Synchronize bowler wicket count.
+        if bowler_gets_wicket:
+            expected_wickets = getattr(result, "bowler_wickets", bowler.wickets)
+            result.bowler_wickets = expected_wickets
+        else:
+            result.bowler_wickets = bowler.wickets
+
+        # Placeholder for batting-order logic.
+        incoming_batter = None
+
+        if dismissed_player is striker:
+            new_striker = incoming_batter
+        elif dismissed_player is non_striker:
+            new_non_striker = incoming_batter
+
+        # Populate dismissal information.
+        result.wicket = True
+        result.wicket_fell = True
+        result.dismissal = dismissal
+        result.dismissal_type = dismissal
+        result.dismissed_player = dismissed_player
+        result.incoming_batter = incoming_batter
+        result.total_wickets = innings.wickets
+
+
+    # ------------------------------------------------------------------
+    # Innings completion
+    # ------------------------------------------------------------------
+
+    innings_completed = False
+
+    completion_reason = None
+
+    # --------------------------------------------------------------
+    # All out
+    # --------------------------------------------------------------
+
+    if innings.wickets >= innings.max_wickets:
+        innings_completed = True
+        completion_reason = InningsCompletionReason.ALL_OUT
+
+    # --------------------------------------------------------------
+    # Overs exhausted
+    # --------------------------------------------------------------
+
+    elif innings.legal_balls >= (
+        innings.allocated_overs * BALLS_PER_OVER
+    ):
+        innings_completed = True
+        completion_reason = InningsCompletionReason.OVERS_COMPLETED
+
+    # --------------------------------------------------------------
+    # Successful chase
+    # --------------------------------------------------------------
+
+    elif (
+        innings.target is not None
+        and innings.total_runs >= innings.target
+    ):
+        innings_completed = True
+        completion_reason = InningsCompletionReason.TARGET_REACHED
+
+        if hasattr(state, "match"):
+            if hasattr(state.match, "winner"):
+                state.match.winner = batting_team
+
+            if hasattr(state.match, "status"):
+                state.match.status = MatchStatus.COMPLETED
+
+    # --------------------------------------------------------------
+    # Declaration (supported if the model exposes it)
+    # --------------------------------------------------------------
+
+    elif (
+        hasattr(ball_input, "declare_innings")
+        and ball_input.declare_innings
+    ):
+        innings_completed = True
+
+        if hasattr(InningsCompletionReason, "DECLARATION"):
+            completion_reason = InningsCompletionReason.DECLARATION
+        else:
+            completion_reason = "DECLARATION"
+
+    # --------------------------------------------------------------
+    # Persist completion state
+    # --------------------------------------------------------------
+
+    if hasattr(innings, "completed"):
+        innings.completed = innings_completed
+
+    if hasattr(innings, "is_complete"):
+        innings.is_complete = innings_completed
+
+    if hasattr(innings, "completion_reason"):
+        innings.completion_reason = completion_reason
+
+    if hasattr(state, "innings_complete"):
+        state.innings_complete = innings_completed
+
+    if hasattr(state, "match_status"):
+        if innings_completed:
+            state.match_status = MatchStatus.INNINGS_COMPLETE
+
+    # Chase status
+    chase_completed = (
+        completion_reason == InningsCompletionReason.TARGET_REACHED
+        if innings.target is not None
+        else False
+    )
+
+    if hasattr(state, "chase_completed"):
+        state.chase_completed = chase_completed
+
+    # --------------------------------------------------------------
+    # Populate BallResult
+    # --------------------------------------------------------------
+
+    result.innings_complete = innings_completed
+    result.completion_reason = completion_reason
+    result.chase_completed = chase_completed
+
+    if hasattr(result, "match_status"):
+        if hasattr(state, "match_status"):
+            result.match_status = state.match_status
+
+    if hasattr(result, "winner"):
+        if hasattr(state, "match") and hasattr(state.match, "winner"):
+            result.winner = state.match.winner
+
+
+
+
+
+
+# ============================================================================
+# apply_delivery() finalization helpers
+# ============================================================================
+
+from copy import deepcopy
+
+
+def _swap_batters(
+    striker: BatterState,
+    non_striker: BatterState,
+) -> tuple[BatterState, BatterState]:
+    """
+    Swap striker and non-striker.
+
+    This helper centralizes strike rotation so every caller performs the
+    transition consistently.
+    """
+    return non_striker, striker
+
+
+def _build_next_innings_state(
+    previous: InningsState,
+    *,
+    innings: Innings,
+    batting_team: TeamState,
+    bowling_team: TeamState,
+    striker: BatterState,
+    non_striker: BatterState,
+    bowler: BowlerState,
+) -> InningsState:
+    """
+    Construct the next immutable InningsState.
+
+    A new state instance is returned rather than mutating the previous
+    instance in-place. This guarantees deterministic state transitions and
+    simplifies replay, undo, simulation and testing.
+    """
+    return replace(
+        previous,
+        innings=innings,
+        batting_team=batting_team,
+        bowling_team=bowling_team,
+        striker=striker,
+        non_striker=non_striker,
+        current_bowler=bowler,
+    )
+
+
+# ============================================================================
+# apply_delivery() return finalization
+#
+# Replace the temporary:
+#
+#     return state, result
+#
+# with the following block.
+# ============================================================================
+
+    # ----------------------------------------------------------------------
+    # Synchronize BallResult with the finalized state.
+    # ----------------------------------------------------------------------
+
+    result.striker = striker
+    result.non_striker = non_striker
+    result.bowler = bowler
+
+    result.total_runs = innings.total_runs
+    result.total_wickets = innings.wickets
+    result.legal_balls = innings.legal_balls
+
+    if hasattr(innings, "current_over"):
+        result.current_over = innings.current_over
+
+    if hasattr(innings, "completed"):
+        result.innings_complete = innings.completed
+
+    # ----------------------------------------------------------------------
+    # Produce the next immutable state.
+    # ----------------------------------------------------------------------
+
+    next_state = _build_next_innings_state(
+        state,
+        innings=innings,
+        batting_team=batting_team,
+        bowling_team=bowling_team,
+        striker=striker,
+        non_striker=non_striker,
+        bowler=bowler,
+    )
+
+    return next_state, result
+
+
+# ============================================================================
+# Public exports
+# ============================================================================
+
+for _symbol in (
+    "apply_delivery",
+    "_swap_batters",
+    "_build_next_innings_state",
+):
+    if _symbol not in __all__:
+        __all__.append(_symbol)
