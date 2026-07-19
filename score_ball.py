@@ -3892,3 +3892,1607 @@ def validate_wicket_dispatcher_configuration() -> None:
                 f"No processor registered for '{dismissal_type}'."
             )
 
+
+
+# ============================================================================
+# Part 5N-1 - Shared apply_wicket() helper utilities
+# ============================================================================
+
+from typing import Optional
+
+
+def _validate_apply_wicket_inputs(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> None:
+    """
+    Validate the objects supplied to apply_wicket().
+
+    This helper intentionally performs only structural validation and delegates
+    detailed validation to the existing validation framework already present in
+    the module.
+
+    Parameters
+    ----------
+    state:
+        Immutable innings state.
+    outcome:
+        Result produced by the wicket processing framework.
+
+    Raises
+    ------
+    ValueError
+        If either object is invalid.
+    """
+    _validate_innings_state_for_wicket(state)
+    _validate_wicket_outcome_for_application(outcome)
+
+
+def _validate_innings_state_for_wicket(
+    state: "InningsState",
+) -> None:
+    """
+    Validate that an InningsState is suitable for wicket application.
+
+    Existing validation helpers are reused whenever they exist so that all
+    innings validation logic remains centralized.
+    """
+    if state is None:
+        raise ValueError("InningsState cannot be None.")
+
+    validator = globals().get("validate_innings_state")
+    if callable(validator):
+        validator(state)
+
+
+def _validate_wicket_outcome_for_application(
+    outcome: "WicketOutcome",
+) -> None:
+    """
+    Validate a WicketOutcome before it is applied.
+
+    The wicket processing layer is responsible for producing a valid outcome.
+    This helper simply guarantees that apply_wicket() never operates on an
+    invalid object.
+    """
+    if outcome is None:
+        raise ValueError("WicketOutcome cannot be None.")
+
+    validator = (
+        globals().get("validate_wicket_outcome")
+        or globals().get("validate_wicket")
+    )
+
+    if callable(validator):
+        validator(outcome)
+
+
+def _requires_wicket_state_update(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> bool:
+    """
+    Determine whether apply_wicket() should perform any state transition.
+
+    Returning False indicates that the supplied outcome represents no wicket
+    event (or no state mutation is required).
+    """
+    if outcome is None:
+        return False
+
+    if getattr(outcome, "is_wicket", False):
+        return True
+
+    if getattr(outcome, "dismissal", None) is not None:
+        return True
+
+    if getattr(outcome, "dismissal_info", None) is not None:
+        return True
+
+    if getattr(outcome, "dismissed_batter", None) is not None:
+        return True
+
+    return False
+
+
+def _get_dismissed_batter_from_outcome(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+):
+    """
+    Safely retrieve the dismissed batter.
+
+    Preference order:
+
+    1. Explicit batter object.
+    2. Batter stored in dismissal information.
+    3. Batter resolved from batting order (future compatibility).
+
+    Returns
+    -------
+    Optional[Any]
+        Dismissed batter object if available.
+    """
+    batter = getattr(outcome, "dismissed_batter", None)
+    if batter is not None:
+        return batter
+
+    dismissal = (
+        getattr(outcome, "dismissal_info", None)
+        or getattr(outcome, "dismissal", None)
+    )
+
+    if dismissal is None:
+        return None
+
+    batter = getattr(dismissal, "dismissed_batter", None)
+    if batter is not None:
+        return batter
+
+    batter = getattr(dismissal, "batter", None)
+    if batter is not None:
+        return batter
+
+    batter_id = (
+        getattr(dismissal, "dismissed_batter_id", None)
+        or getattr(dismissal, "batter_id", None)
+    )
+
+    if batter_id is None:
+        return None
+
+    resolver = globals().get("get_batter_by_id")
+    if callable(resolver):
+        try:
+            return resolver(state, batter_id)
+        except Exception:
+            return None
+
+    return None
+
+
+def _get_credited_bowler_from_outcome(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+):
+    """
+    Safely retrieve the bowler who should receive wicket credit.
+
+    Returns
+    -------
+    Optional[Any]
+        Bowler object or None if no credit is applicable.
+    """
+    bowler = getattr(outcome, "credited_bowler", None)
+    if bowler is not None:
+        return bowler
+
+    dismissal = (
+        getattr(outcome, "dismissal_info", None)
+        or getattr(outcome, "dismissal", None)
+    )
+
+    if dismissal is not None:
+        bowler = getattr(dismissal, "credited_bowler", None)
+        if bowler is not None:
+            return bowler
+
+        bowler = getattr(dismissal, "bowler", None)
+        if bowler is not None:
+            return bowler
+
+    current_bowler = getattr(state, "current_bowler", None)
+    if current_bowler is not None:
+        return current_bowler
+
+    return None
+
+
+def _get_credited_fielder_from_outcome(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+):
+    """
+    Safely retrieve the credited fielder.
+
+    Not every dismissal credits a fielder, therefore None is a valid result.
+
+    Returns
+    -------
+    Optional[Any]
+        Credited fielder object or None.
+    """
+    fielder = getattr(outcome, "credited_fielder", None)
+    if fielder is not None:
+        return fielder
+
+    dismissal = (
+        getattr(outcome, "dismissal_info", None)
+        or getattr(outcome, "dismissal", None)
+    )
+
+    if dismissal is None:
+        return None
+
+    fielder = getattr(dismissal, "credited_fielder", None)
+    if fielder is not None:
+        return fielder
+
+    fielder = getattr(dismissal, "fielder", None)
+    if fielder is not None:
+        return fielder
+
+    fielder_id = getattr(dismissal, "fielder_id", None)
+    if fielder_id is None:
+        return None
+
+    resolver = globals().get("get_fielder_by_id")
+    if callable(resolver):
+        try:
+            return resolver(state, fielder_id)
+        except Exception:
+            return None
+
+    return None
+
+
+# ============================================================================
+# Part 5N-2 - Batter state update helpers
+# ============================================================================
+
+from dataclasses import replace
+from typing import Any, Mapping, MutableMapping, Optional
+
+
+def _apply_batter_wicket_updates(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Apply all batter-related wicket updates to an innings state.
+
+    This helper is intentionally limited to batter state only.
+
+    Responsibilities
+    ----------------
+    * Mark the batter as dismissed.
+    * Record dismissal information.
+    * Update batting status.
+    * Update batting statistics.
+    * Preserve immutability.
+
+    Team totals, bowler figures, fielder statistics, partnerships and fall of
+    wicket information are handled elsewhere.
+
+    Parameters
+    ----------
+    state:
+        Existing immutable innings state.
+    outcome:
+        Validated wicket outcome.
+
+    Returns
+    -------
+    InningsState
+        Updated immutable innings state.
+    """
+    dismissed = _get_dismissed_batter_from_outcome(state, outcome)
+    if dismissed is None:
+        return state
+
+    updated_batter = _build_dismissed_batter(
+        dismissed_batter=dismissed,
+        outcome=outcome,
+    )
+
+    updated_batters = _replace_batter_in_collection(
+        state=state,
+        updated_batter=updated_batter,
+    )
+
+    if updated_batters is None:
+        return state
+
+    return replace(
+        state,
+        batters=updated_batters,
+    )
+
+
+def _build_dismissed_batter(
+    dismissed_batter: Any,
+    outcome: "WicketOutcome",
+):
+    """
+    Construct an updated immutable batter object.
+
+    Only batter-related information is modified.
+    """
+    dismissal = (
+        getattr(outcome, "dismissal_info", None)
+        or getattr(outcome, "dismissal", None)
+    )
+
+    updated = _mark_batter_dismissed(dismissed_batter)
+    updated = _record_batter_dismissal(updated, dismissal)
+    updated = _update_batter_status_after_wicket(updated)
+    updated = _update_batter_statistics_after_wicket(updated, dismissal)
+
+    return updated
+
+
+def _mark_batter_dismissed(
+    batter: Any,
+):
+    """
+    Return an immutable batter marked as dismissed.
+    """
+    kwargs: dict[str, Any] = {}
+
+    for attribute in (
+        "is_out",
+        "dismissed",
+        "out",
+    ):
+        if hasattr(batter, attribute):
+            kwargs[attribute] = True
+
+    if not kwargs:
+        return batter
+
+    return replace(batter, **kwargs)
+
+
+def _record_batter_dismissal(
+    batter: Any,
+    dismissal: Optional[Any],
+):
+    """
+    Persist dismissal information onto the batter record.
+
+    The helper supports multiple compatible field names so that it remains
+    resilient to future model evolution.
+    """
+    if dismissal is None:
+        return batter
+
+    kwargs: dict[str, Any] = {}
+
+    if hasattr(batter, "dismissal"):
+        kwargs["dismissal"] = dismissal
+
+    if hasattr(batter, "dismissal_info"):
+        kwargs["dismissal_info"] = dismissal
+
+    dismissal_text = getattr(dismissal, "description", None)
+    if dismissal_text is None:
+        dismissal_text = getattr(dismissal, "text", None)
+
+    if dismissal_text is not None:
+        if hasattr(batter, "how_out"):
+            kwargs["how_out"] = dismissal_text
+
+        if hasattr(batter, "dismissal_text"):
+            kwargs["dismissal_text"] = dismissal_text
+
+    if not kwargs:
+        return batter
+
+    return replace(batter, **kwargs)
+
+
+def _update_batter_status_after_wicket(
+    batter: Any,
+):
+    """
+    Update batter status flags after dismissal.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if hasattr(batter, "status"):
+        kwargs["status"] = "OUT"
+
+    if hasattr(batter, "is_batting"):
+        kwargs["is_batting"] = False
+
+    if hasattr(batter, "active"):
+        kwargs["active"] = False
+
+    if not kwargs:
+        return batter
+
+    return replace(batter, **kwargs)
+
+
+def _update_batter_statistics_after_wicket(
+    batter: Any,
+    dismissal: Optional[Any],
+):
+    """
+    Update batter statistics associated with dismissal.
+
+    No batting runs, balls, boundaries or strike-rate values are modified here,
+    as they are finalized when the delivery itself is processed.
+
+    This helper only updates dismissal-related statistical fields.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if hasattr(batter, "innings_completed"):
+        kwargs["innings_completed"] = True
+
+    if dismissal is not None:
+        if hasattr(batter, "dismissal_kind"):
+            kind = getattr(dismissal, "kind", None)
+            if kind is not None:
+                kwargs["dismissal_kind"] = kind
+
+        if hasattr(batter, "dismissal_code"):
+            code = getattr(dismissal, "code", None)
+            if code is not None:
+                kwargs["dismissal_code"] = code
+
+    if not kwargs:
+        return batter
+
+    return replace(batter, **kwargs)
+
+
+def _replace_batter_in_collection(
+    state: "InningsState",
+    updated_batter: Any,
+):
+    """
+    Return an updated immutable batter collection.
+
+    The function preserves the original collection type whenever possible.
+    """
+    batters = getattr(state, "batters", None)
+    if batters is None:
+        return None
+
+    updated_id = getattr(updated_batter, "id", None)
+
+    if isinstance(batters, Mapping):
+        new_mapping: MutableMapping[Any, Any] = dict(batters)
+
+        if updated_id in new_mapping:
+            new_mapping[updated_id] = updated_batter
+            return type(batters)(new_mapping)
+
+        for key, batter in batters.items():
+            if batter == updated_batter:
+                new_mapping[key] = updated_batter
+                return type(batters)(new_mapping)
+
+        return type(batters)(new_mapping)
+
+    updated_sequence = []
+    replaced = False
+
+    for batter in batters:
+        if not replaced:
+            if (
+                updated_id is not None
+                and getattr(batter, "id", object()) == updated_id
+            ):
+                updated_sequence.append(updated_batter)
+                replaced = True
+                continue
+
+            if batter is updated_batter:
+                updated_sequence.append(updated_batter)
+                replaced = True
+                continue
+
+        updated_sequence.append(batter)
+
+    return type(batters)(updated_sequence)
+
+
+# ============================================================================
+# Part 5N-3 - Bowler & Fielder state update helpers
+# ============================================================================
+
+from dataclasses import replace
+from typing import Any, Mapping, MutableMapping, Optional
+
+
+def _apply_bowler_and_fielder_updates(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Apply bowling and fielding updates resulting from a wicket.
+
+    Responsibilities
+    ----------------
+    * Award wickets to the credited bowler where applicable.
+    * Update bowler dismissal counters.
+    * Update credited fielder statistics.
+    * Preserve immutability.
+
+    This helper intentionally does NOT modify:
+
+    * batting state
+    * innings totals
+    * partnerships
+    * fall-of-wicket information
+    * striker/non-striker
+
+    Parameters
+    ----------
+    state:
+        Existing immutable innings state.
+
+    outcome:
+        Validated wicket outcome.
+
+    Returns
+    -------
+    InningsState
+        Updated immutable innings state.
+    """
+    new_state = state
+
+    bowler = _get_credited_bowler_from_outcome(new_state, outcome)
+    if bowler is not None:
+        new_state = _update_bowler_after_wicket(
+            new_state,
+            bowler,
+            outcome,
+        )
+
+    fielder = _get_credited_fielder_from_outcome(new_state, outcome)
+    if fielder is not None:
+        new_state = _update_fielder_after_wicket(
+            new_state,
+            fielder,
+            outcome,
+        )
+
+    return new_state
+
+
+# ---------------------------------------------------------------------------
+# Bowler helpers
+# ---------------------------------------------------------------------------
+
+
+def _update_bowler_after_wicket(
+    state: "InningsState",
+    bowler: Any,
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Update the credited bowler after a wicket.
+
+    Bowling statistics are only updated when the dismissal is officially
+    credited to the bowler.
+    """
+    dismissal = (
+        getattr(outcome, "dismissal_info", None)
+        or getattr(outcome, "dismissal", None)
+    )
+
+    updated_bowler = _build_updated_bowler(
+        bowler,
+        dismissal,
+    )
+
+    updated_collection = _replace_player_in_collection(
+        getattr(state, "bowlers", None),
+        updated_bowler,
+    )
+
+    if updated_collection is None:
+        return state
+
+    return replace(
+        state,
+        bowlers=updated_collection,
+    )
+
+
+def _build_updated_bowler(
+    bowler: Any,
+    dismissal: Optional["DismissalInfo"],
+):
+    """
+    Return an immutable bowler with updated wicket statistics.
+    """
+    updated = bowler
+
+    if _dismissal_counts_for_bowler(dismissal):
+        updated = _increment_stat_if_present(updated, "wickets")
+        updated = _increment_stat_if_present(updated, "wickets_taken")
+
+    updated = _increment_bowler_dismissal_counter(
+        updated,
+        dismissal,
+    )
+
+    return updated
+
+
+def _dismissal_counts_for_bowler(
+    dismissal: Optional["DismissalInfo"],
+) -> bool:
+    """
+    Determine whether this dismissal should credit the bowler.
+
+    Run-outs and similar dismissals are excluded.
+    """
+    if dismissal is None:
+        return False
+
+    credited = getattr(dismissal, "credits_bowler", None)
+    if credited is not None:
+        return bool(credited)
+
+    kind = (
+        getattr(dismissal, "kind", None)
+        or getattr(dismissal, "dismissal_kind", None)
+        or getattr(dismissal, "type", None)
+    )
+
+    if kind is None:
+        return True
+
+    return str(kind).lower() not in {
+        "run out",
+        "run_out",
+        "retired",
+        "retired out",
+        "retired_out",
+        "obstructing the field",
+        "obstructing_field",
+    }
+
+
+def _increment_bowler_dismissal_counter(
+    bowler: Any,
+    dismissal: Optional["DismissalInfo"],
+):
+    """
+    Increment dismissal-type specific counters if they exist.
+    """
+    if dismissal is None:
+        return bowler
+
+    kind = (
+        getattr(dismissal, "kind", None)
+        or getattr(dismissal, "dismissal_kind", None)
+        or getattr(dismissal, "type", None)
+    )
+
+    if kind is None:
+        return bowler
+
+    normalized = str(kind).lower().replace(" ", "_")
+
+    mapping = {
+        "bowled": "bowled_dismissals",
+        "caught": "caught_dismissals",
+        "lbw": "lbw_dismissals",
+        "stumped": "stumped_dismissals",
+        "hit_wicket": "hit_wicket_dismissals",
+    }
+
+    field = mapping.get(normalized)
+    if field is None:
+        return bowler
+
+    return _increment_stat_if_present(bowler, field)
+
+
+# ---------------------------------------------------------------------------
+# Fielder helpers
+# ---------------------------------------------------------------------------
+
+
+def _update_fielder_after_wicket(
+    state: "InningsState",
+    fielder: Any,
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Update fielding statistics after a dismissal.
+    """
+    dismissal = (
+        getattr(outcome, "dismissal_info", None)
+        or getattr(outcome, "dismissal", None)
+    )
+
+    updated_fielder = _build_updated_fielder(
+        fielder,
+        dismissal,
+    )
+
+    updated_collection = _replace_player_in_collection(
+        getattr(state, "fielders", None),
+        updated_fielder,
+    )
+
+    if updated_collection is None:
+        return state
+
+    return replace(
+        state,
+        fielders=updated_collection,
+    )
+
+
+def _build_updated_fielder(
+    fielder: Any,
+    dismissal: Optional["DismissalInfo"],
+):
+    """
+    Return an immutable fielder with updated fielding statistics.
+    """
+    if dismissal is None:
+        return fielder
+
+    updated = fielder
+
+    kind = (
+        getattr(dismissal, "kind", None)
+        or getattr(dismissal, "dismissal_kind", None)
+        or getattr(dismissal, "type", None)
+    )
+
+    normalized = (
+        str(kind).lower().replace(" ", "_")
+        if kind is not None
+        else ""
+    )
+
+    if normalized == "caught":
+        updated = _increment_stat_if_present(updated, "catches")
+
+    elif normalized == "stumped":
+        updated = _increment_stat_if_present(updated, "stumpings")
+
+    elif normalized in {"run_out", "run-out"}:
+        updated = _increment_stat_if_present(updated, "run_outs")
+        updated = _increment_stat_if_present(
+            updated,
+            "run_out_participations",
+        )
+
+    return updated
+
+
+# ---------------------------------------------------------------------------
+# Generic immutable helpers
+# ---------------------------------------------------------------------------
+
+
+def _increment_stat_if_present(
+    obj: Any,
+    attribute: str,
+):
+    """
+    Increment an integer statistic if the attribute exists.
+
+    Objects that do not expose the requested statistic are returned unchanged.
+    """
+    if not hasattr(obj, attribute):
+        return obj
+
+    value = getattr(obj, attribute)
+    if value is None:
+        value = 0
+
+    return replace(
+        obj,
+        **{
+            attribute: value + 1,
+        },
+    )
+
+
+def _replace_player_in_collection(
+    collection: Any,
+    updated_player: Any,
+):
+    """
+    Replace a player inside an immutable collection while preserving its type.
+    """
+    if collection is None:
+        return None
+
+    player_id = getattr(updated_player, "id", None)
+
+    if isinstance(collection, Mapping):
+        updated: MutableMapping[Any, Any] = dict(collection)
+
+        if player_id in updated:
+            updated[player_id] = updated_player
+            return type(collection)(updated)
+
+        for key, value in collection.items():
+            if getattr(value, "id", object()) == player_id:
+                updated[key] = updated_player
+                break
+
+        return type(collection)(updated)
+
+    sequence = []
+
+    for player in collection:
+        if (
+            player_id is not None
+            and getattr(player, "id", object()) == player_id
+        ):
+            sequence.append(updated_player)
+        else:
+            sequence.append(player)
+
+    return type(collection)(sequence)
+
+
+# ============================================================================
+# Part 5N-4 - Team wicket & fall-of-wicket helpers
+# ============================================================================
+
+from dataclasses import replace
+from typing import Any, Optional
+
+
+def _apply_team_wicket_updates(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Apply all team-level wicket updates.
+
+    Responsibilities
+    ----------------
+    * Increment wickets fallen.
+    * Append a fall-of-wicket record.
+    * Record dismissal sequence.
+    * Maintain wicket numbering.
+    * Preserve immutability.
+
+    This helper intentionally does NOT modify:
+
+    * batting order
+    * striker/non-striker
+    * batter statistics
+    * bowler statistics
+    * fielder statistics
+    """
+    if not _requires_wicket_state_update(state, outcome):
+        return state
+
+    dismissal = (
+        getattr(outcome, "dismissal_info", None)
+        or getattr(outcome, "dismissal", None)
+    )
+
+    updated_state = _increment_team_wickets(state)
+
+    updated_state = _append_fall_of_wicket_record(
+        updated_state,
+        dismissal,
+        outcome,
+    )
+
+    updated_state = _append_dismissal_sequence(
+        updated_state,
+        dismissal,
+        outcome,
+    )
+
+    return updated_state
+
+
+# ---------------------------------------------------------------------------
+# Team wicket helpers
+# ---------------------------------------------------------------------------
+
+
+def _increment_team_wickets(
+    state: "InningsState",
+) -> "InningsState":
+    """
+    Return an immutable innings state with wickets incremented.
+
+    The helper updates whichever wicket field is present on the
+    InningsState model.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if hasattr(state, "wickets"):
+        kwargs["wickets"] = getattr(state, "wickets") + 1
+
+    if hasattr(state, "wickets_fallen"):
+        kwargs["wickets_fallen"] = (
+            getattr(state, "wickets_fallen") + 1
+        )
+
+    if not kwargs:
+        return state
+
+    return replace(state, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Fall-of-wicket helpers
+# ---------------------------------------------------------------------------
+
+
+def _append_fall_of_wicket_record(
+    state: "InningsState",
+    dismissal: Optional["DismissalInfo"],
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Append an immutable fall-of-wicket record.
+
+    Existing records are preserved in order.
+    """
+    collection = getattr(state, "fall_of_wickets", None)
+    if collection is None:
+        return state
+
+    record = _build_fall_of_wicket_record(
+        state,
+        dismissal,
+        outcome,
+    )
+
+    updated_collection = list(collection)
+    updated_collection.append(record)
+
+    return replace(
+        state,
+        fall_of_wickets=type(collection)(updated_collection),
+    )
+
+
+def _build_fall_of_wicket_record(
+    state: "InningsState",
+    dismissal: Optional["DismissalInfo"],
+    outcome: "WicketOutcome",
+):
+    """
+    Build an immutable fall-of-wicket record.
+
+    The returned object is intentionally represented as a dictionary so it
+    can be consumed by later integration layers without introducing new
+    dataclasses.
+    """
+    batter = _get_dismissed_batter_from_outcome(state, outcome)
+
+    wicket_number = _next_wicket_number(state)
+
+    return {
+        "wicket": wicket_number,
+        "runs": _score_at_dismissal(state),
+        "over": _dismissal_over_notation(state),
+        "batter": batter,
+        "dismissal": dismissal,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Dismissal sequence helpers
+# ---------------------------------------------------------------------------
+
+
+def _append_dismissal_sequence(
+    state: "InningsState",
+    dismissal: Optional["DismissalInfo"],
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Append a dismissal to the chronological dismissal sequence.
+    """
+    sequence = getattr(state, "dismissal_sequence", None)
+    if sequence is None:
+        return state
+
+    updated = list(sequence)
+
+    updated.append(
+        {
+            "wicket": _next_wicket_number(state),
+            "dismissal": dismissal,
+            "batter": _get_dismissed_batter_from_outcome(
+                state,
+                outcome,
+            ),
+        }
+    )
+
+    return replace(
+        state,
+        dismissal_sequence=type(sequence)(updated),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared value helpers
+# ---------------------------------------------------------------------------
+
+
+def _next_wicket_number(
+    state: "InningsState",
+) -> int:
+    """
+    Return the wicket number being recorded.
+
+    The first wicket is numbered 1.
+    """
+    if hasattr(state, "wickets"):
+        return getattr(state, "wickets") + 1
+
+    if hasattr(state, "wickets_fallen"):
+        return getattr(state, "wickets_fallen") + 1
+
+    return 1
+
+
+def _score_at_dismissal(
+    state: "InningsState",
+) -> int:
+    """
+    Return the team's score when the wicket fell.
+    """
+    if hasattr(state, "total_runs"):
+        return getattr(state, "total_runs")
+
+    if hasattr(state, "runs"):
+        return getattr(state, "runs")
+
+    if hasattr(state, "team_runs"):
+        return getattr(state, "team_runs")
+
+    return 0
+
+
+def _dismissal_over_notation(
+    state: "InningsState",
+):
+    """
+    Return the over notation associated with the dismissal.
+
+    Existing over formatting helpers are reused when available.
+    """
+    formatter = (
+        globals().get("format_over_notation")
+        or globals().get("balls_to_over_notation")
+    )
+
+    if callable(formatter):
+        legal_balls = (
+            getattr(state, "legal_balls", None)
+            or getattr(state, "balls", None)
+        )
+
+        if legal_balls is not None:
+            try:
+                return formatter(legal_balls)
+            except Exception:
+                pass
+
+    if hasattr(state, "current_over"):
+        return getattr(state, "current_over")
+
+    if hasattr(state, "over_notation"):
+        return getattr(state, "over_notation")
+
+    return None
+
+
+
+
+# ============================================================================
+# Part 5N-5 - Batting-order progression helpers
+# ============================================================================
+
+from dataclasses import replace
+from typing import Any, Iterable, Optional
+
+
+def _apply_batting_order_progression(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Apply batting-order progression after a dismissal.
+
+    Responsibilities
+    ----------------
+    * Select the next available batter.
+    * Replace the dismissed striker/non-striker.
+    * Preserve batting order.
+    * Detect batting exhaustion.
+
+    This helper intentionally does NOT modify:
+
+    * batting statistics
+    * bowling statistics
+    * fielding statistics
+    * innings totals
+    * wicket totals
+    * partnerships
+
+    Returns
+    -------
+    InningsState
+        Updated immutable innings state.
+    """
+    dismissed = _get_dismissed_batter_from_outcome(state, outcome)
+    if dismissed is None:
+        return state
+
+    next_batter = _select_next_batter(state)
+
+    if next_batter is None:
+        return _mark_batting_exhausted(state)
+
+    if _is_current_striker(state, dismissed):
+        return _replace_striker(state, next_batter)
+
+    if _is_current_non_striker(state, dismissed):
+        return _replace_non_striker(state, next_batter)
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Batter selection
+# ---------------------------------------------------------------------------
+
+
+def _select_next_batter(
+    state: "InningsState",
+):
+    """
+    Return the next eligible batter in batting-order sequence.
+
+    The first batter satisfying all eligibility requirements is returned.
+    """
+    for batter in _iter_available_batters(state):
+        if _is_batter_available_for_selection(batter):
+            return batter
+
+    return None
+
+
+def _iter_available_batters(
+    state: "InningsState",
+) -> Iterable[Any]:
+    """
+    Iterate through batters that have not yet entered the innings.
+
+    Preference is given to an explicit batting-order collection.
+    """
+    batting_order = getattr(state, "batting_order", None)
+
+    if batting_order is not None:
+        yield from batting_order
+        return
+
+    batters = getattr(state, "batters", None)
+
+    if batters is None:
+        return
+
+    if isinstance(batters, dict):
+        yield from batters.values()
+    else:
+        yield from batters
+
+
+def _is_batter_available_for_selection(
+    batter: Any,
+) -> bool:
+    """
+    Determine whether a batter is eligible to enter the innings.
+    """
+    if getattr(batter, "is_batting", False):
+        return False
+
+    if getattr(batter, "active", False):
+        return False
+
+    if getattr(batter, "is_out", False):
+        return False
+
+    if getattr(batter, "dismissed", False):
+        return False
+
+    if getattr(batter, "has_batted", False):
+        return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Striker / non-striker replacement
+# ---------------------------------------------------------------------------
+
+
+def _replace_striker(
+    state: "InningsState",
+    new_batter: Any,
+) -> "InningsState":
+    """
+    Return an immutable state with a new striker.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if hasattr(state, "striker"):
+        kwargs["striker"] = new_batter
+
+    if not kwargs:
+        return state
+
+    return replace(state, **kwargs)
+
+
+def _replace_non_striker(
+    state: "InningsState",
+    new_batter: Any,
+) -> "InningsState":
+    """
+    Return an immutable state with a new non-striker.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if hasattr(state, "non_striker"):
+        kwargs["non_striker"] = new_batter
+
+    if not kwargs:
+        return state
+
+    return replace(state, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_current_striker(
+    state: "InningsState",
+    batter: Any,
+) -> bool:
+    """
+    Return True if the supplied batter is the current striker.
+    """
+    striker = getattr(state, "striker", None)
+
+    if striker is None:
+        return False
+
+    striker_id = getattr(striker, "id", None)
+    batter_id = getattr(batter, "id", None)
+
+    if striker_id is not None and batter_id is not None:
+        return striker_id == batter_id
+
+    return striker is batter
+
+
+def _is_current_non_striker(
+    state: "InningsState",
+    batter: Any,
+) -> bool:
+    """
+    Return True if the supplied batter is the current non-striker.
+    """
+    non_striker = getattr(state, "non_striker", None)
+
+    if non_striker is None:
+        return False
+
+    non_striker_id = getattr(non_striker, "id", None)
+    batter_id = getattr(batter, "id", None)
+
+    if non_striker_id is not None and batter_id is not None:
+        return non_striker_id == batter_id
+
+    return non_striker is batter
+
+
+# ---------------------------------------------------------------------------
+# Innings exhaustion
+# ---------------------------------------------------------------------------
+
+
+def _mark_batting_exhausted(
+    state: "InningsState",
+) -> "InningsState":
+    """
+    Mark the innings as having no remaining available batters.
+
+    This helper does not calculate whether the innings should end; it merely
+    records that the batting order has been exhausted.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if hasattr(state, "batting_exhausted"):
+        kwargs["batting_exhausted"] = True
+
+    if hasattr(state, "all_out"):
+        kwargs["all_out"] = True
+
+    if not kwargs:
+        return state
+
+    return replace(state, **kwargs)
+
+
+
+
+# ============================================================================
+# Part 5N-6 - Innings completion helpers
+# ============================================================================
+
+from dataclasses import replace
+from typing import Any
+
+
+def _apply_innings_completion_updates(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Apply innings completion logic after a wicket.
+
+    Responsibilities
+    ----------------
+    * Detect all-out.
+    * Detect batting exhaustion.
+    * Set innings completion flags.
+    * Produce a terminal immutable innings state when appropriate.
+
+    This helper intentionally does NOT modify:
+
+    * scoring
+    * batting statistics
+    * bowling statistics
+    * fielding statistics
+    * innings totals
+
+    Parameters
+    ----------
+    state:
+        Current immutable innings state.
+
+    outcome:
+        Validated wicket outcome.
+
+    Returns
+    -------
+    InningsState
+        Updated immutable innings state.
+    """
+    if not _requires_wicket_state_update(state, outcome):
+        return state
+
+    if not _is_terminal_after_wicket(state):
+        return state
+
+    return _build_terminal_innings_state(state)
+
+
+# ---------------------------------------------------------------------------
+# Completion detection
+# ---------------------------------------------------------------------------
+
+
+def _is_terminal_after_wicket(
+    state: "InningsState",
+) -> bool:
+    """
+    Determine whether the innings has become terminal.
+
+    The innings is considered terminal when either:
+
+    * every wicket has fallen, or
+    * no eligible batter remains.
+    """
+    return (
+        _is_all_out(state)
+        or _has_no_remaining_batters(state)
+        or bool(getattr(state, "batting_exhausted", False))
+    )
+
+
+def _is_all_out(
+    state: "InningsState",
+) -> bool:
+    """
+    Determine whether all wickets have fallen.
+
+    Existing helper functions are reused whenever available.
+    """
+    helper = globals().get("is_all_out")
+
+    if callable(helper):
+        return bool(helper(state))
+
+    wickets = getattr(
+        state,
+        "wickets_fallen",
+        getattr(state, "wickets", 0),
+    )
+
+    max_wickets = getattr(state, "max_wickets", None)
+
+    if max_wickets is None:
+        batting_order = getattr(state, "batting_order", None)
+
+        if batting_order is not None:
+            try:
+                max_wickets = max(len(batting_order) - 1, 0)
+            except TypeError:
+                max_wickets = None
+
+    if max_wickets is None:
+        return False
+
+    return wickets >= max_wickets
+
+
+def _has_no_remaining_batters(
+    state: "InningsState",
+) -> bool:
+    """
+    Return True when no further batter may enter.
+
+    Existing batting-order helpers are reused where possible.
+    """
+    selector = globals().get("_select_next_batter")
+
+    if callable(selector):
+        return selector(state) is None
+
+    return bool(getattr(state, "batting_exhausted", False))
+
+
+# ---------------------------------------------------------------------------
+# Terminal state construction
+# ---------------------------------------------------------------------------
+
+
+def _build_terminal_innings_state(
+    state: "InningsState",
+) -> "InningsState":
+    """
+    Construct an immutable terminal innings state.
+
+    Only completion-related flags are modified.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if hasattr(state, "batting_exhausted"):
+        kwargs["batting_exhausted"] = True
+
+    if hasattr(state, "all_out"):
+        kwargs["all_out"] = _is_all_out(state)
+
+    if hasattr(state, "innings_complete"):
+        kwargs["innings_complete"] = True
+
+    if hasattr(state, "completed"):
+        kwargs["completed"] = True
+
+    if hasattr(state, "is_complete"):
+        kwargs["is_complete"] = True
+
+    if hasattr(state, "terminal"):
+        kwargs["terminal"] = True
+
+    if hasattr(state, "match_state") and getattr(state, "match_state") != "COMPLETED":
+        kwargs["match_state"] = "COMPLETED"
+
+    if not kwargs:
+        return state
+
+    return replace(state, **kwargs)
+
+
+# ============================================================================
+# Part 5N-7 - apply_wicket()
+# ============================================================================
+
+def apply_wicket(
+    state: "InningsState",
+    outcome: "WicketOutcome",
+) -> "InningsState":
+    """
+    Apply a validated wicket outcome to an immutable innings state.
+
+    This function is the sole orchestration point for wicket-related state
+    transitions. It delegates all work to specialized pure helper functions,
+    ensuring that batting, bowling, fielding, team, batting-order and innings
+    completion logic remain isolated and independently testable.
+
+    Processing order
+    ----------------
+    1. Validate inputs.
+    2. Determine whether a wicket state transition is required.
+    3. Update dismissed batter information.
+    4. Update credited bowler and fielder statistics.
+    5. Update team wicket and fall-of-wicket records.
+    6. Progress the batting order.
+    7. Apply innings completion logic.
+    8. Return a new immutable InningsState.
+
+    Parameters
+    ----------
+    state:
+        Current immutable innings state.
+
+    outcome:
+        Validated wicket outcome produced by the wicket processing framework.
+
+    Returns
+    -------
+    InningsState
+        A new immutable innings state reflecting the wicket. If the supplied
+        outcome does not require any wicket-related state transition, the
+        original state is returned unchanged.
+    """
+    _validate_apply_wicket_inputs(state, outcome)
+
+    if not _requires_wicket_state_update(state, outcome):
+        return state
+
+    updated_state = state
+
+    # ------------------------------------------------------------------
+    # Batter updates
+    # ------------------------------------------------------------------
+    updated_state = _apply_batter_wicket_updates(
+        updated_state,
+        outcome,
+    )
+
+    # ------------------------------------------------------------------
+    # Bowling & fielding updates
+    # ------------------------------------------------------------------
+    updated_state = _apply_bowler_and_fielder_updates(
+        updated_state,
+        outcome,
+    )
+
+    # ------------------------------------------------------------------
+    # Team wicket state
+    # ------------------------------------------------------------------
+    updated_state = _apply_team_wicket_updates(
+        updated_state,
+        outcome,
+    )
+
+    # ------------------------------------------------------------------
+    # Batting order progression
+    # ------------------------------------------------------------------
+    updated_state = _apply_batting_order_progression(
+        updated_state,
+        outcome,
+    )
+
+    # ------------------------------------------------------------------
+    # Innings completion
+    # ------------------------------------------------------------------
+    updated_state = _apply_innings_completion_updates(
+        updated_state,
+        outcome,
+    )
+
+    return updated_state
+
+
+
+
+
+
+
