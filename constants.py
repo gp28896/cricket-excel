@@ -165,7 +165,7 @@ from __future__ import annotations
 
 from typing import Final, Literal
 
-__author__: Final[str] = "Your Name"
+__author__: Final[str] = "Gaurav R Panchal"
 __version__: Final[str] = "1.0.0"
 
 # ============================================================================
