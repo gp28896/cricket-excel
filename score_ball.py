@@ -5630,3 +5630,1108 @@ def apply_wicket(
 
 
 
+# ============================================================================
+# Part 5O-1 — apply_delivery() Wicket Integration Plan
+#
+# This section documents how wicket processing integrates into the existing
+# immutable transition engine. No behavioural changes are introduced here.
+# The actual implementation of apply_delivery() is added in Part 5O-2.
+# ============================================================================
+
+"""
+Integration Overview
+====================
+
+The existing delivery transition engine already performs a sequence of
+independent state transformations.
+
+Current workflow:
+
+    BallInput
+        │
+        ▼
+    validate delivery
+        │
+        ▼
+    calculate delivery result
+        │
+        ▼
+    update batter statistics
+        │
+        ▼
+    update bowler statistics
+        │
+        ▼
+    update extras
+        │
+        ▼
+    update strike
+        │
+        ▼
+    update innings completion
+        │
+        ▼
+    construct BallResult
+        │
+        ▼
+    return (InningsState, BallResult)
+
+The wicket framework must be inserted after scoring updates have been
+calculated but before strike rotation and innings completion.
+
+New transition sequence:
+
+    calculate_runs()
+            │
+            ▼
+    update_batter()
+            │
+            ▼
+    update_bowler()
+            │
+            ▼
+    update_extras()
+            │
+            ▼
+    process_wicket()
+            │
+            ▼
+    apply_wicket()
+            │
+            ▼
+    update_strike()
+            │
+            ▼
+    update_completion()
+            │
+            ▼
+    build BallResult
+            │
+            ▼
+    return new immutable state
+
+The orchestration remains linear and immutable.
+
+Each helper remains responsible for a single domain.
+"""
+
+
+# ============================================================================
+# Helper Responsibilities
+# ============================================================================
+
+"""
+calculate_runs()
+----------------
+
+Input:
+    BallInput
+
+Produces:
+    - batter runs
+    - extras
+    - total runs
+    - boundary information
+    - legal delivery information
+
+Does NOT:
+    - update InningsState
+    - process wickets
+    - rotate strike
+"""
+
+
+"""
+update_batter()
+---------------
+
+Responsible only for batter scoring statistics.
+
+Updates:
+    • runs
+    • balls faced
+    • fours
+    • sixes
+
+Does NOT:
+    • dismiss batter
+    • replace batter
+    • increment wicket count
+"""
+
+
+"""
+update_bowler()
+---------------
+
+Responsible only for bowler statistics.
+
+Updates:
+    • legal balls
+    • overs
+    • runs conceded
+    • maiden calculations
+    • wicket credit (if current architecture assigns it here)
+
+Does NOT:
+    • determine dismissal
+    • replace batters
+    • update strike
+"""
+
+
+"""
+update_extras()
+---------------
+
+Responsible only for innings extras.
+
+Updates:
+    • wides
+    • no-balls
+    • byes
+    • leg-byes
+    • penalty extras
+
+Does NOT:
+    • dismiss batters
+    • modify player statistics
+"""
+
+
+"""
+process_wicket()
+----------------
+
+Pure dispatcher.
+
+Consumes:
+    BallInput
+    delivery outcome
+    current InningsState
+
+Produces:
+    Optional[WicketOutcome]
+
+Responsibilities:
+    • identify dismissal type
+    • dispatch to wicket helper
+    • validate dismissal information
+
+Does NOT:
+    • modify InningsState
+    • update statistics
+"""
+
+
+"""
+apply_wicket()
+--------------
+
+Consumes:
+    InningsState
+    WicketOutcome
+
+Responsible for immutable wicket state transition.
+
+Updates:
+    • wickets fallen
+    • dismissal information
+    • dismissed batter
+    • fall of wicket
+    • batter replacement state
+    • fielding statistics (if applicable)
+
+Does NOT:
+    • calculate runs
+    • rotate strike
+    • finish innings
+"""
+
+
+"""
+update_strike()
+---------------
+
+Responsible only for striker/non-striker resolution.
+
+Considers:
+    • runs scored
+    • legal delivery
+    • over completion
+    • wicket outcome
+
+This remains the only helper responsible for deciding the batting ends.
+
+apply_wicket() must not perform strike rotation.
+"""
+
+
+"""
+update_completion()
+-------------------
+
+Responsible only for innings completion.
+
+Checks:
+    • all wickets lost
+    • target reached
+    • overs exhausted
+    • innings termination conditions
+
+No other helper should mark an innings complete.
+"""
+
+
+# ============================================================================
+# Integration Rules
+# ============================================================================
+
+"""
+The wicket framework must not duplicate existing responsibilities.
+
+Batter updates
+--------------
+Scoring remains inside update_batter().
+
+Dismissal remains inside apply_wicket().
+
+
+Bowler updates
+--------------
+Bowler statistics remain inside update_bowler().
+
+apply_wicket() must not duplicate bowler updates already handled there.
+
+
+Extras
+------
+Extras remain exclusively inside update_extras().
+
+
+Strike rotation
+---------------
+Strike changes remain exclusively inside update_strike().
+
+apply_wicket() may identify replacement batters but must not rotate strike.
+
+
+Innings completion
+------------------
+Only update_completion() decides whether an innings has ended.
+
+apply_wicket() only records the wicket transition.
+"""
+
+
+# ============================================================================
+# Planned apply_delivery() Integration Sequence
+# ============================================================================
+
+"""
+The final implementation introduced in Part 5O-2 will follow this order:
+
+    1. calculate_runs()
+
+    2. update_batter()
+
+    3. update_bowler()
+
+    4. update_extras()
+
+    5. process_wicket()
+
+    6. apply_wicket()           (only when a wicket exists)
+
+    7. update_strike()
+
+    8. update_completion()
+
+    9. construct BallResult
+
+   10. return (InningsState, BallResult)
+
+This preserves the existing transition engine while inserting wicket
+processing as an isolated state transformation.
+"""
+
+
+# ============================================================================
+# Required Helper Calls
+# ============================================================================
+
+"""
+Expected helper chain:
+
+calculate_runs(...)
+        │
+        ▼
+update_batter(...)
+        │
+        ▼
+update_bowler(...)
+        │
+        ▼
+update_extras(...)
+        │
+        ▼
+process_wicket(...)
+        │
+        ▼
+apply_wicket(...)     (conditional)
+        │
+        ▼
+update_strike(...)
+        │
+        ▼
+update_completion(...)
+        │
+        ▼
+build BallResult
+"""
+
+
+
+# ============================================================================
+# Missing Helper Verification
+# ============================================================================
+
+"""
+Before integrating wicket handling, the following helpers should exist:
+
+Required:
+    ✓ calculate_runs()
+    ✓ update_batter()
+    ✓ update_bowler()
+    ✓ update_extras()
+    ✓ process_wicket()
+    ✓ apply_wicket()
+    ✓ update_strike()
+    ✓ update_completion()
+
+Optional utility helpers (only if not already present):
+
+    • is_wicket_delivery()
+        Returns True if BallInput represents a dismissal.
+
+    • replace_dismissed_batter()
+        Encapsulates batter replacement logic if not already handled by
+        apply_wicket().
+
+    • build_ball_result()
+        Centralises BallResult construction after all state transitions.
+
+No behavioural changes are introduced in this section.
+The actual apply_delivery() integration is implemented in Part 5O-2.
+"""
+
+# ============================================================================
+# Part 5O-2 — apply_delivery() Transition Orchestration
+# ============================================================================
+
+def apply_delivery(
+    state: InningsState,
+    ball_input: BallInput,
+) -> tuple[InningsState, BallResult]:
+    """
+    Apply a single delivery to an innings.
+
+    This function is intentionally an orchestration layer only.
+
+    All cricket-specific business logic is delegated to dedicated helper
+    functions responsible for individual transition stages.
+
+    Transition pipeline:
+
+        1. Calculate delivery outcome
+        2. Update team score
+        3. Update batter statistics
+        4. Update bowler statistics
+        5. Update extras
+        6. Process wicket event
+        7. Apply wicket (if any)
+        8. Update strike
+        9. Update innings completion
+       10. Build BallResult
+
+    Every helper returns a new immutable InningsState.
+    """
+
+    # ------------------------------------------------------------------
+    # Stage 1 : Calculate delivery outcome
+    # ------------------------------------------------------------------
+
+    delivery_result = calculate_runs(
+        state=state,
+        ball_input=ball_input,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 2 : Update team score
+    # ------------------------------------------------------------------
+
+    next_state = update_team_score(
+        state=state,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 3 : Update batter statistics
+    # ------------------------------------------------------------------
+
+    next_state = update_batter(
+        state=next_state,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 4 : Update bowler statistics
+    # ------------------------------------------------------------------
+
+    next_state = update_bowler(
+        state=next_state,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 5 : Update extras
+    # ------------------------------------------------------------------
+
+    next_state = update_extras(
+        state=next_state,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 6 : Process wicket event
+    # ------------------------------------------------------------------
+
+    wicket_outcome = process_wicket(
+        state=next_state,
+        ball_input=ball_input,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 7 : Apply wicket transition
+    # ------------------------------------------------------------------
+
+    if wicket_outcome is not None:
+        next_state = apply_wicket(
+            state=next_state,
+            outcome=wicket_outcome,
+        )
+
+    # ------------------------------------------------------------------
+    # Stage 8 : Update strike
+    # ------------------------------------------------------------------
+
+    next_state = update_strike(
+        state=next_state,
+        delivery_result=delivery_result,
+        wicket_outcome=wicket_outcome,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 9 : Update innings completion
+    # ------------------------------------------------------------------
+
+    next_state = update_completion(
+        state=next_state,
+        delivery_result=delivery_result,
+        wicket_outcome=wicket_outcome,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 10 : Build BallResult
+    # ------------------------------------------------------------------
+
+    ball_result = build_ball_result(
+        state=next_state,
+        ball_input=ball_input,
+        delivery_result=delivery_result,
+        wicket_outcome=wicket_outcome,
+    )
+
+    return next_state, ball_result
+
+
+# ------------------------------------------------------------------
+# Stage 6 : Process wicket event
+# ------------------------------------------------------------------
+#
+# Wicket handling is intentionally split into two responsibilities:
+#
+#   process_wicket()
+#       • inspects BallInput and delivery outcome
+#       • determines whether a dismissal occurred
+#       • validates dismissal information
+#       • produces a WicketOutcome
+#
+#   apply_wicket()
+#       • performs the immutable state transition
+#       • records dismissal
+#       • updates wicket-related statistics
+#       • leaves strike rotation and innings completion to later stages
+#
+# apply_delivery() performs orchestration only.
+
+wicket_outcome: WicketOutcome | None = None
+
+if ball_input.wicket is not None:
+    wicket_outcome = process_wicket(
+        state=next_state,
+        ball_input=ball_input,
+        delivery_result=delivery_result,
+    )
+
+    if wicket_outcome is not None:
+        next_state = apply_wicket(
+            state=next_state,
+            outcome=wicket_outcome,
+        )
+
+# ------------------------------------------------------------------
+# Stage 7 : Update strike
+# ------------------------------------------------------------------
+
+next_state = update_strike(
+    state=next_state,
+    delivery_result=delivery_result,
+    wicket_outcome=wicket_outcome,
+)
+
+# ------------------------------------------------------------------
+# Stage 8 : Update innings completion
+# ------------------------------------------------------------------
+
+next_state = update_completion(
+    state=next_state,
+    delivery_result=delivery_result,
+    wicket_outcome=wicket_outcome,
+)
+
+# ------------------------------------------------------------------
+# Stage 9 : Build BallResult
+# ------------------------------------------------------------------
+
+ball_result = build_ball_result(
+    state=next_state,
+    ball_input=ball_input,
+    delivery_result=delivery_result,
+    wicket_outcome=wicket_outcome,
+)
+
+
+# ============================================================================
+# Part 5O-4 — Delivery/Wicket Compatibility Validation Helpers
+#
+# These helpers validate that wicket processing is invoked only for delivery
+# types that are compatible with the existing dismissal framework.
+#
+# No cricket rules are implemented here.
+# No wicket decisions are made here.
+# Existing wicket dispatcher and validators remain authoritative.
+# ============================================================================
+
+from typing import Optional
+
+
+def _delivery_has_wicket(ball_input: BallInput) -> bool:
+    """
+    Returns True if the delivery contains wicket information.
+
+    This helper intentionally performs only presence detection.
+    Wicket legality is delegated to the existing wicket validator.
+    """
+    return getattr(ball_input, "wicket", None) is not None
+
+
+def _process_delivery_wicket(
+    state: InningsState,
+    ball_input: BallInput,
+    delivery_result,
+) -> Optional[WicketOutcome]:
+    """
+    Compatibility wrapper around process_wicket().
+
+    Responsibilities:
+
+    • Skip wicket processing when no dismissal exists.
+    • Delegate dismissal validation to process_wicket().
+    • Never modify state.
+    • Never infer dismissal legality.
+
+    Supported delivery categories (validated by existing dispatcher):
+
+        • Legal deliveries
+        • Wide deliveries
+        • No-ball deliveries
+        • Byes
+        • Leg-byes
+        • Boundary deliveries
+
+    Any dismissal legality for these delivery types is determined entirely
+    by the existing wicket dispatcher and validation framework.
+    """
+
+    if not _delivery_has_wicket(ball_input):
+        return None
+
+    return process_wicket(
+        state=state,
+        ball_input=ball_input,
+        delivery_result=delivery_result,
+    )
+
+
+def _apply_delivery_wicket(
+    state: InningsState,
+    wicket_outcome: Optional[WicketOutcome],
+) -> InningsState:
+    """
+    Apply a previously validated wicket outcome.
+
+    If no dismissal occurred, the original immutable state is returned.
+
+    This helper exists solely to keep apply_delivery() linear and readable.
+    """
+
+    if wicket_outcome is None:
+        return state
+
+    return apply_wicket(
+        state=state,
+        outcome=wicket_outcome,
+    )
+
+
+# ============================================================================
+# apply_delivery() Integration
+#
+# Replace the wicket stage with the following orchestration.
+# ============================================================================
+
+# ------------------------------------------------------------------
+# Stage 6 : Process wicket event
+# ------------------------------------------------------------------
+
+wicket_outcome = _process_delivery_wicket(
+    state=next_state,
+    ball_input=ball_input,
+    delivery_result=delivery_result,
+)
+
+# ------------------------------------------------------------------
+# Stage 7 : Apply wicket transition
+# ------------------------------------------------------------------
+
+next_state = _apply_delivery_wicket(
+    state=next_state,
+    wicket_outcome=wicket_outcome,
+)
+
+# ------------------------------------------------------------------
+# Compatibility Notes
+#
+# Legal delivery
+#   ✓ bowled
+#   ✓ caught
+#   ✓ lbw
+#   ✓ run out
+#   ✓ stumped
+#
+# Wide
+#   ✓ delegated to existing wicket validator
+#   ✓ legal-ball accounting unchanged
+#
+# No-ball
+#   ✓ dismissal legality delegated
+#   ✓ illegal-delivery handling preserved
+#
+# Bye
+#   ✓ dismissal legality delegated
+#
+# Leg-bye
+#   ✓ dismissal legality delegated
+#
+# Boundary
+#   ✓ wicket/runs interaction delegated
+#
+# No new dismissal rules are introduced.
+# No delivery-specific logic is duplicated.
+# The existing wicket dispatcher remains the single source of truth.
+# ============================================================================
+
+
+# ============================================================================
+# Part 5O-5 — Final BallResult Construction
+#
+# BallResult is created only after the complete immutable transition has
+# finished. It represents the final state of the delivery after all scoring,
+# wicket, strike and innings transitions have been applied.
+# ============================================================================
+
+
+def build_ball_result(
+    *,
+    state: InningsState,
+    ball_input: BallInput,
+    delivery_result,
+    wicket_outcome: WicketOutcome | None,
+) -> BallResult:
+    """
+    Construct the immutable BallResult for a completed delivery.
+
+    This helper must be invoked only after:
+
+        • update_team_score()
+        • update_batter()
+        • update_bowler()
+        • update_extras()
+        • apply_wicket()
+        • update_strike()
+        • update_completion()
+
+    The returned BallResult is therefore a representation of the completed
+    transition and must never perform additional cricket logic.
+
+    Responsibilities:
+
+        • expose delivery scoring
+        • expose extras
+        • expose wicket information
+        • expose dismissal information
+        • expose batter changes
+        • expose striker/non-striker after transition
+        • expose innings completion state
+
+    No statistics are calculated here.
+    No InningsState modifications occur here.
+    """
+
+    return BallResult(
+        # --------------------------------------------------------------
+        # Delivery summary
+        # --------------------------------------------------------------
+        runs=getattr(delivery_result, "runs", 0),
+        batter_runs=getattr(delivery_result, "batter_runs", 0),
+        extras=getattr(delivery_result, "extras", 0),
+
+        # --------------------------------------------------------------
+        # Wicket information
+        # --------------------------------------------------------------
+        wicket=wicket_outcome is not None,
+        wicket_outcome=wicket_outcome,
+        dismissal=(
+            wicket_outcome.dismissal
+            if wicket_outcome is not None
+            else None
+        ),
+
+        # --------------------------------------------------------------
+        # Batting state after transition
+        # --------------------------------------------------------------
+        striker=state.striker,
+        non_striker=state.non_striker,
+
+        # Optional batter replacement information.
+        #
+        # If the current model exposes incoming/outgoing batter fields,
+        # they should already have been populated by apply_wicket().
+        dismissed_batter=getattr(
+            wicket_outcome,
+            "dismissed_batter",
+            None,
+        ),
+        incoming_batter=getattr(
+            wicket_outcome,
+            "incoming_batter",
+            None,
+        ),
+
+        # --------------------------------------------------------------
+        # Innings state after transition
+        # --------------------------------------------------------------
+        innings_complete=state.innings_complete,
+
+        # Preserve any additional delivery metadata already produced by
+        # the delivery pipeline.
+        legal_delivery=getattr(
+            delivery_result,
+            "legal_delivery",
+            None,
+        ),
+        boundary=getattr(
+            delivery_result,
+            "boundary",
+            None,
+        ),
+        over=getattr(
+            state,
+            "current_over",
+            None,
+        ),
+    )
+
+
+# ============================================================================
+# apply_delivery() Final Stage
+#
+# BallResult construction MUST occur only after every immutable state
+# transition has completed.
+# ============================================================================
+
+# ------------------------------------------------------------------
+# Stage 8 : Update strike
+# ------------------------------------------------------------------
+
+next_state = update_strike(
+    state=next_state,
+    delivery_result=delivery_result,
+    wicket_outcome=wicket_outcome,
+)
+
+# ------------------------------------------------------------------
+# Stage 9 : Update innings completion
+# ------------------------------------------------------------------
+
+next_state = update_completion(
+    state=next_state,
+    delivery_result=delivery_result,
+    wicket_outcome=wicket_outcome,
+)
+
+# ------------------------------------------------------------------
+# Stage 10 : Build final immutable BallResult
+# ------------------------------------------------------------------
+
+ball_result = build_ball_result(
+    state=next_state,
+    ball_input=ball_input,
+    delivery_result=delivery_result,
+    wicket_outcome=wicket_outcome,
+)
+
+return next_state, ball_result
+
+
+
+# ============================================================================
+# Part 5O-6 — Final apply_delivery() Integration
+#
+# This replaces the apply_delivery() orchestration with the finalized
+# immutable transition pipeline.
+#
+# Design goals:
+#
+# • No cricket business logic
+# • No duplicated statistics updates
+# • No duplicated wicket handling
+# • Helper-driven state transitions
+# • Fully immutable
+# • Compatible with:
+#       - InningsState
+#       - BallInput
+#       - BallResult
+#       - WicketOutcome
+#       - DismissalInfo
+#       - apply_wicket()
+#       - scorecard.py
+#       - leaderboard.py
+#       - workbook.py
+# ============================================================================
+
+from typing import Optional
+
+
+def apply_delivery(
+    state: InningsState,
+    ball_input: BallInput,
+) -> tuple[InningsState, BallResult]:
+    """
+    Apply a single delivery to an innings.
+
+    This function is the orchestration layer of the immutable innings
+    transition engine.
+
+    Every state modification is delegated to a dedicated helper.
+
+    Transition pipeline:
+
+        calculate_delivery()
+                │
+                ▼
+        update_runs()
+                │
+                ▼
+        update_batter()
+                │
+                ▼
+        update_bowler()
+                │
+                ▼
+        update_extras()
+                │
+                ▼
+        process_wicket()
+                │
+                ▼
+        apply_wicket()
+                │
+                ▼
+        update_strike()
+                │
+                ▼
+        update_completion()
+                │
+                ▼
+        create_ball_result()
+
+    No helper should modify responsibilities belonging to another helper.
+
+    In particular:
+
+        process_wicket()
+            decides WHAT happened.
+
+        apply_wicket()
+            applies immutable wicket transitions.
+
+        update_strike()
+            resolves batting ends.
+
+        update_completion()
+            determines whether innings has finished.
+
+        create_ball_result()
+            exposes the completed immutable transition.
+
+    Returns
+    -------
+    tuple[InningsState, BallResult]
+        Updated immutable innings state together with the completed delivery
+        result.
+    """
+
+    # ------------------------------------------------------------------
+    # Stage 1
+    # Calculate delivery outcome
+    # ------------------------------------------------------------------
+
+    delivery_result = calculate_delivery(
+        state=state,
+        ball_input=ball_input,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 2
+    # Team score
+    # ------------------------------------------------------------------
+
+    next_state = update_runs(
+        state=state,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 3
+    # Batter statistics
+    # ------------------------------------------------------------------
+
+    next_state = update_batter(
+        state=next_state,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 4
+    # Bowler statistics
+    # ------------------------------------------------------------------
+
+    next_state = update_bowler(
+        state=next_state,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 5
+    # Extras
+    # ------------------------------------------------------------------
+
+    next_state = update_extras(
+        state=next_state,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 6
+    # Wicket processing
+    #
+    # process_wicket() performs all dismissal validation and converts the
+    # delivery into an immutable WicketOutcome.
+    #
+    # No state modification occurs here.
+    # ------------------------------------------------------------------
+
+    wicket_outcome: Optional[WicketOutcome] = process_wicket(
+        state=next_state,
+        ball_input=ball_input,
+        delivery_result=delivery_result,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 7
+    # Wicket transition
+    #
+    # apply_wicket() owns every wicket-related state mutation.
+    #
+    # apply_delivery() never:
+    #
+    #   • increments wickets
+    #   • dismisses batters
+    #   • updates fielders
+    #   • updates bowler wicket tallies
+    # ------------------------------------------------------------------
+
+    if wicket_outcome is not None:
+        next_state = apply_wicket(
+            state=next_state,
+            outcome=wicket_outcome,
+        )
+
+    # ------------------------------------------------------------------
+    # Stage 8
+    # Strike resolution
+    # ------------------------------------------------------------------
+
+    next_state = update_strike(
+        state=next_state,
+        delivery_result=delivery_result,
+        wicket_outcome=wicket_outcome,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 9
+    # Innings completion
+    # ------------------------------------------------------------------
+
+    next_state = update_completion(
+        state=next_state,
+        delivery_result=delivery_result,
+        wicket_outcome=wicket_outcome,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 10
+    # Final immutable BallResult
+    # ------------------------------------------------------------------
+
+    ball_result = create_ball_result(
+        state=next_state,
+        ball_input=ball_input,
+        delivery_result=delivery_result,
+        wicket_outcome=wicket_outcome,
+    )
+
+    return next_state, ball_result
