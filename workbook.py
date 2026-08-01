@@ -116,6 +116,8 @@ from contextlib import contextmanager
 from time import perf_counter
 
 from openpyxl.cell.cell import MergedCell
+from openpyxl.workbook.defined_name import DefinedName
+from openpyxl import load_workbook as _load_workbook
 from openpyxl.utils import (
     column_index_from_string,
     coordinate_from_string,
@@ -1966,9 +1968,6 @@ class WorkbookBuilder:
 ###############################################################################
 # WorkbookBuilder - Named range management
 ###############################################################################
-
-from openpyxl.workbook.defined_name import DefinedName
-
 
     def create_named_range(
         self,
@@ -4648,10 +4647,6 @@ from openpyxl.workbook.defined_name import DefinedName
 ###############################################################################
 # WorkbookBuilder - Public API and convenience interface
 ###############################################################################
-
-
-from openpyxl import load_workbook as _load_workbook
-
 
     def build_workbook(self) -> Workbook:
         """Build and initialize a workbook.
